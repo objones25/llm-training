@@ -42,6 +42,7 @@ class TrainConfig:
     # Validation
     val_every: int = 250       # steps between val-loss evaluations; 0 disables
     val_batches: int = 20      # number of val batches to average per evaluation
+    early_stopping_patience: int = 0  # val evals without improvement before stopping; 0 disables
 
     # Observability
     grad_log_every: int = 100
@@ -70,6 +71,10 @@ class TrainConfig:
             raise ValueError(f"val_batches must be positive, got {self.val_batches}")
         if self.val_every < 0:
             raise ValueError(f"val_every must be non-negative, got {self.val_every}")
+        if self.early_stopping_patience < 0:
+            raise ValueError(
+                f"early_stopping_patience must be non-negative, got {self.early_stopping_patience}"
+            )
         if self.warmup_steps >= self.max_steps:
             raise ValueError(
                 f"warmup_steps ({self.warmup_steps}) must be less than "

@@ -142,6 +142,11 @@ def train(
     weight_heatmap_rows: list[list[float]] = []
     latest_grad_norms: list[float] = []
 
+    # ── Early stopping state ──────────────────────────────────────────────────
+    _best_val_loss: float = float("inf")
+    _patience_counter: int = 0
+    _early_stopped: bool = False
+
     # model.train() is set once before the loop — not repeated per step.
     model.train()
 
@@ -282,6 +287,22 @@ def train(
             val_steps_list.append(step)
             val_losses_list.append(val_loss_avg)
 
+            # ── Early stopping ────────────────────────────────────────────────
+            if cfg.early_stopping_patience > 0:
+                if val_loss_avg < _best_val_loss:
+                    _best_val_loss = val_loss_avg
+                    _patience_counter = 0
+                else:
+                    _patience_counter += 1
+                    if _patience_counter >= cfg.early_stopping_patience:
+                        _log.info(
+                            f"early_stopping triggered at step={step} "
+                            f"best_val_loss={_best_val_loss:.4f} "
+                            f"patience={cfg.early_stopping_patience}"
+                        )
+                        _early_stopped = True
+                        break
+
         # ── Save / overwrite plots ─────────────────────────────────────────────
         if step % cfg.plot_every == 0:
             plot_loss(
@@ -322,7 +343,7 @@ def train(
     # If the loop exits before reaching max_steps, the token stream was shorter
     # than expected. Warn so the caller knows training was cut short.
     steps_completed = step + 1 if step >= 0 else 0
-    if steps_completed < cfg.max_steps:
+    if not _early_stopped and steps_completed < cfg.max_steps:
         warnings.warn(
             f"Token stream exhausted after {steps_completed} steps; "
             f"requested {cfg.max_steps}. Training was cut short.",
