@@ -116,12 +116,16 @@ def test_loss_monotone_fixed_batch(
     warmup_steps=0 gives full LR from step 0 (no warmup plateau). A cycling
     stream of exactly one batch worth of tokens ensures identical inputs/targets
     at every step so any decrease is purely due to gradient descent.
+
+    learning_rate=1e-3 is chosen deliberately: with GPT-2 style initialization
+    the model starts near ln(vocab_size) ≈ 5.5, so lr=1e-2 overshoots and
+    breaks monotonicity. 1e-3 stays comfortably in the convergent regime.
     """
     cfg = _cfg(
         tmp_path,
         max_steps=5,
         warmup_steps=0,
-        learning_rate=1e-2,
+        learning_rate=1e-3,
     )
     torch.manual_seed(0)
     train(cfg, token_stream=_fixed_batch_stream(cfg))

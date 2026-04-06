@@ -196,6 +196,28 @@ def test_short_sequence(model: GPT, cfg: TrainConfig) -> None:
     assert logits.shape == (2, 1, cfg.vocab_size)
 
 
+def test_init_loss_near_uniform(cfg: TrainConfig) -> None:
+    """Step-0 loss must be within 5% of ln(vocab_size).
+
+    GPT-2 style initialization (std=0.02 + residual scaling) should produce
+    near-uniform output distributions at init. If this fails, the model is
+    confidently wrong before training starts, wasting the entire warmup phase.
+    """
+    import math
+
+    torch.manual_seed(0)
+    m = GPT(cfg)
+    idx = torch.randint(0, cfg.vocab_size, (2, cfg.seq_len))
+    targets = torch.randint(0, cfg.vocab_size, (2, cfg.seq_len))
+    logits = m(idx)
+    loss = F.cross_entropy(logits.view(-1, cfg.vocab_size), targets.view(-1))
+    expected = math.log(cfg.vocab_size)
+    assert abs(loss.item() - expected) / expected < 0.05, (
+        f"Initial loss {loss.item():.4f} is not within 5% of "
+        f"ln(vocab_size)={expected:.4f}. Check weight initialization."
+    )
+
+
 def test_n_heads_assertion(cfg: TrainConfig) -> None:
     """ValueError must be raised when d_model is not divisible by n_heads.
 

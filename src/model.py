@@ -175,6 +175,7 @@ class GPT(nn.Module):
 
     def __init__(self, cfg: TrainConfig) -> None:
         super().__init__()
+        self._n_layers = cfg.n_layers
         self.token_embedding = nn.Embedding(cfg.vocab_size, cfg.d_model)
         self.position_embedding = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.blocks = nn.ModuleList(
@@ -188,6 +189,18 @@ class GPT(nn.Module):
         # language model training (see Press & Wolf, 2017).
         self.lm_head.weight = self.token_embedding.weight
 
+        # GPT-2 style initialization — keeps initial logit magnitudes small so
+        # step-0 loss ≈ ln(vocab_size) rather than hundreds.
+        self.apply(self._init_weights)
+        # Scale down residual projections: each block adds two contributions to
+        # the residual stream (attn out_proj + ff fc2), so depth amplifies
+        # variance by 2*n_layers.  Dividing std by sqrt(2*n_layers) keeps the
+        # residual stream variance independent of depth (see GPT-2 paper §2.3).
+        residual_std = 0.02 / (2 * cfg.n_layers) ** 0.5
+        for name, p in self.named_parameters():
+            if name.endswith(("attn.out_proj.weight", "ff.fc2.weight")):
+                nn.init.normal_(p, mean=0.0, std=residual_std)
+
         # Store non-embedding parameter count as an attribute.
         # The "embedding" filter correctly excludes token_embedding.weight
         # (yielded under that name) and position_embedding.weight.
@@ -198,6 +211,22 @@ class GPT(nn.Module):
             for name, p in self.named_parameters()
             if "embedding" not in name
         )
+
+    def _init_weights(self, module: nn.Module) -> None:
+        """GPT-2 style weight initialization.
+
+        - Embeddings and all Linear weights: N(0, 0.02)
+        - Linear biases: zeros
+
+        Residual projections (out_proj, fc2) are scaled down separately after
+        apply() returns, in __init__, using a named-parameter pass.
+        """
+        if isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        elif isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
 
     def forward(self, idx: torch.Tensor) -> torch.Tensor:
         """
