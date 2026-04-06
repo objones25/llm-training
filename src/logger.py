@@ -1,47 +1,54 @@
-"""Gradient and weight norm logging for LM pretraining.
+"""Gradient and training-step logger.
 
-Provides ``GradientLogger``, a stateless logger called by ``train.py`` every
-step.  All formatting and output lives here -- ``train.py`` never calls
-``print`` directly.
+All training output routes through this module.
 
-Output contracts (from CLAUDE.md)
-----------------------------------
-Every step -- single line to stdout::
+Console (INFO and above)
+    One terse summary line per step, plus WARNING lines when a layer
+    gradient norm exceeds the configured threshold.
 
-    step=100 loss=3.4821 lr=0.000287 grad_norm=1.2341 grad_norm_min=0.0012 grad_norm_max=4.3210
+File (DEBUG and above)
+    Everything — per-layer gradient norms at ``grad_log_every`` cadence,
+    per-layer weight norms at ``weight_log_every`` cadence, the step
+    summary, and WARNING lines.
 
-Six fields, ``key=value`` format, space-separated.  If any layer's gradient
-norm exceeds ``cfg.grad_norm_warn_threshold``, an additional WARNING line
-follows immediately::
-
-    WARNING step=100 layer=transformer.block.5.attn.q_proj grad_norm=14.3201 exceeds threshold=10.0
-
-Every ``cfg.grad_log_every`` steps -- per-layer gradient norms::
-
-    grad step=100 layer=transformer.block.0.attn.q_proj norm=0.3821
-
-Every ``cfg.weight_log_every`` steps -- per-layer weight norms::
-
-    weight step=500 layer=transformer.block.0.attn.q_proj norm=1.2341
-
-Public API
-----------
-    GradientLogger(cfg: TrainConfig)
-        .log_step(step, loss, lr, model)
-        .log_layers(step, model)
+Setup
+-----
+Call ``configure_logging(cfg)`` once from ``train.py`` before the training
+loop.  Tests do *not* call ``configure_logging``; pytest's ``caplog``
+fixture captures records through normal propagation to the root logger.
 """
 from __future__ import annotations
 
+import logging
 import math
-
-import torch.nn as nn
 
 from src.config import TrainConfig
 
+_log = logging.getLogger("llm_training")
+
+
+def configure_logging(cfg: TrainConfig) -> None:
+    """Attach console and file handlers.  Call once before training starts."""
+    _log.setLevel(logging.DEBUG)
+    _log.propagate = False  # Prevent double-printing via root logger.
+
+    fmt = logging.Formatter("%(message)s")
+
+    # Console: terse — step summaries and warnings only.
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(fmt)
+    _log.addHandler(console)
+
+    # File: verbose — everything including per-layer grad/weight lines.
+    if cfg.log_file:
+        fh = logging.FileHandler(cfg.log_file)
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        _log.addHandler(fh)
+
 
 class GradientLogger:
-    """Logs per-step summaries and per-layer gradient/weight norms to stdout."""
-
     def __init__(self, cfg: TrainConfig) -> None:
         self.cfg = cfg
 
@@ -50,25 +57,17 @@ class GradientLogger:
         step: int,
         loss: float,
         lr: float,
-        model: nn.Module,
+        layer_norms: dict[str, float],
     ) -> None:
-        """Emit the per-step summary line, plus WARNING lines for any layer
-        whose gradient norm exceeds cfg.grad_norm_warn_threshold.
+        """Emit one terse summary line (INFO — console + file).
 
         Parameters
         ----------
-        step : int
-        loss : float
-        lr : float
-        model : nn.Module
-            Must have gradients populated (i.e. called after loss.backward()).
+        layer_norms:
+            Pre-clip per-layer gradient norms keyed by parameter name.
+            Must be captured *before* ``clip_grad_norm_()`` is called so
+            the logged values reflect true gradient magnitudes.
         """
-        layer_norms: dict[str, float] = {
-            name: p.grad.norm().item()
-            for name, p in model.named_parameters()
-            if p.grad is not None
-        }
-
         if layer_norms:
             norms = list(layer_norms.values())
             grad_norm = math.sqrt(sum(n * n for n in norms))
@@ -77,7 +76,7 @@ class GradientLogger:
         else:
             grad_norm = grad_norm_min = grad_norm_max = 0.0
 
-        print(
+        _log.info(
             f"step={step} loss={loss:.4f} lr={lr:.6f} "
             f"grad_norm={grad_norm:.4f} "
             f"grad_norm_min={grad_norm_min:.4f} "
@@ -87,7 +86,7 @@ class GradientLogger:
         threshold = self.cfg.grad_norm_warn_threshold
         for name, norm in layer_norms.items():
             if norm > threshold:
-                print(
+                _log.warning(
                     f"WARNING step={step} layer={name} "
                     f"grad_norm={norm:.4f} exceeds threshold={threshold}"
                 )
@@ -95,20 +94,24 @@ class GradientLogger:
     def log_layers(
         self,
         step: int,
-        model: nn.Module,
+        layer_norms: dict[str, float],
+        model: object,
     ) -> None:
-        """Emit per-layer gradient norms and/or weight norms at configured cadences.
+        """Emit per-layer grad and weight lines (DEBUG — file only).
 
         Parameters
         ----------
-        step : int
-        model : nn.Module
+        layer_norms:
+            Pre-clip per-layer gradient norms (same dict passed to
+            ``log_step``).  Only parameters present in this dict get a
+            grad line.
+        model:
+            Live model — iterated for weight norms only.
         """
         if step % self.cfg.grad_log_every == 0:
-            for name, p in model.named_parameters():
-                if p.grad is not None:
-                    print(f"grad step={step} layer={name} norm={p.grad.norm().item():.4f}")
+            for name, norm in layer_norms.items():
+                _log.debug(f"grad step={step} layer={name} norm={norm:.4f}")
 
         if step % self.cfg.weight_log_every == 0:
-            for name, p in model.named_parameters():
-                print(f"weight step={step} layer={name} norm={p.norm().item():.4f}")
+            for name, p in model.named_parameters():  # type: ignore[union-attr]
+                _log.debug(f"weight step={step} layer={name} norm={p.norm().item():.4f}")

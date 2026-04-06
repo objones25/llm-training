@@ -45,6 +45,7 @@ class TrainConfig:
     plot_every: int = 500
     grad_norm_warn_threshold: float = 10.0
     plot_dir: str = "plots"
+    log_file: str = "train.log"
 
     def __post_init__(self) -> None:
         if self.vocab_size <= 0:

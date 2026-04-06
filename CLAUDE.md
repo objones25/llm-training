@@ -87,6 +87,7 @@ class TrainConfig:
     plot_every: int = 500             # cadence for saving plots to disk
     grad_norm_warn_threshold: float = 10.0  # emits WARNING line, does not stop training
     plot_dir: str = "plots"
+    log_file: str = "train.log"            # verbose DEBUG log; "" disables file logging
 
     def __post_init__(self) -> None:
         """Validate configuration parameters eagerly at construction time.
@@ -115,10 +116,26 @@ When testing invalid configs, construct them **inside** `pytest.raises(ValueErro
 
 ## Logging Contract
 
-All logging logic lives in `src/logger.py`. `train.py` calls `logger.log_step()` and
-`logger.log_layers()` — it does not format or print anything itself.
+All logging logic lives in `src/logger.py`. Output routes through Python's `logging` module via a named logger `"llm_training"`.
 
-### Every step — single line to stdout
+### Setup
+
+`train.py` calls `configure_logging(cfg)` once before the training loop. This attaches:
+- **Console (StreamHandler, INFO)** — one terse summary line per step + WARNING lines
+- **File (FileHandler, DEBUG)** — everything: per-layer grad/weight norms, step summary, WARNINGs
+
+`GradientLogger` is instantiated after `configure_logging`. Tests do **not** call `configure_logging`; pytest's `caplog` fixture captures records via normal propagation to the root logger.
+
+### `GradientLogger` API
+
+```python
+logger.log_step(step, loss, lr, layer_norms)   # layer_norms: pre-clip dict[str, float]
+logger.log_layers(step, layer_norms, model)     # grad lines use dict; weight lines use model
+```
+
+`layer_norms` must be captured from `model.named_parameters()` **before** `clip_grad_norm_()` fires. `train.py` builds this dict, clips, then passes the pre-clip dict to the logger.
+
+### Every step — single line to console + file
 
 ```text
 step=100 loss=3.4821 lr=0.000287 grad_norm=1.2341 grad_norm_min=0.0012 grad_norm_max=4.3210
@@ -278,7 +295,7 @@ each test gets written.
 21. Any function that modifies model weights (init, weight tying, parameter freezing) must have a test asserting the parameter tensor values directly — not just that a forward pass runs.
 22. A test must assert that `model.eval()` produces identical outputs on two identical inputs — catches dropout left active during inference.
 23. A test must assert that the training loop raises explicitly (not silently continues) when loss is `nan`.
-24. A test must assert that `GradientLogger.log_layers()` emits per-layer lines to stdout for every named parameter, at the correct step cadence, using a fixed synthetic model.
+24. A test must assert that `GradientLogger.log_layers()` emits per-layer lines for every named parameter, at the correct step cadence, using a fixed synthetic model. Tests use `caplog` — not `capsys` — because output routes through the `logging` module.
 25. A test must assert that a `WARNING` line is emitted (not an exception) when any layer's gradient norm exceeds `grad_norm_warn_threshold`.
 26. Plot tests must assert that each plot function produces a valid, non-empty `.png` file at the expected path — use synthetic data passed directly to the plot function, do not run a training loop.
 27. `TrainConfig` must have a dedicated test file (`test_config.py`) with comprehensive coverage of all `__post_init__` validation rules. Each invalid config must be constructed **inside** `pytest.raises(ValueError)`, never before it.

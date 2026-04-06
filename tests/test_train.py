@@ -49,6 +49,7 @@ def _cfg(tmp_path: Path, **overrides) -> TrainConfig:
         grad_norm_warn_threshold=100.0,
         checkpoint_dir=str(tmp_path / "ckpts"),
         plot_dir=str(tmp_path / "plots"),
+        log_file=str(tmp_path / "train.log"),
         device="cpu",
     )
     defaults.update(overrides)
@@ -97,7 +98,7 @@ def test_smoke_10_steps_loss_decreases(
     cfg = _cfg(tmp_path, max_steps=10)
     torch.manual_seed(0)
     train(cfg, token_stream=_token_stream())
-    losses = _parse_step_losses(capsys.readouterr().out)
+    losses = _parse_step_losses(capsys.readouterr().err)
     assert len(losses) == 10, f"Expected 10 logged steps, got {len(losses)}"
     assert losses[-1] < losses[0], (
         f"Final loss {losses[-1]:.4f} not less than initial {losses[0]:.4f}"
@@ -124,7 +125,7 @@ def test_loss_monotone_fixed_batch(
     )
     torch.manual_seed(0)
     train(cfg, token_stream=_fixed_batch_stream(cfg))
-    losses = _parse_step_losses(capsys.readouterr().out)
+    losses = _parse_step_losses(capsys.readouterr().err)
     assert len(losses) >= 3
     assert losses[0] > losses[1] > losses[2], (
         f"Expected strict decrease for first 3 steps, got {losses[:3]}"

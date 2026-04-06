@@ -28,6 +28,7 @@
     "pyplot",
     "pytest",
     "Sardana",
-    "tiktoken"
+    "tiktoken",
+    "deserialize"
   ]
 }

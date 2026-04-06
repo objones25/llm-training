@@ -30,7 +30,7 @@ import torch.nn.functional as F
 from src.checkpoint import save_checkpoint
 from src.config import TrainConfig
 from src.dataloader import make_batches
-from src.logger import GradientLogger
+from src.logger import GradientLogger, _log, configure_logging
 from src.model import GPT
 from src.optimizer import make_optimizer
 from src.plots import (
@@ -72,6 +72,8 @@ def train(
     RuntimeError
         If ``loss`` is ``nan`` or ``inf`` at any step.
     """
+    configure_logging(cfg)
+
     plot_dir = Path(cfg.plot_dir)
     plot_dir.mkdir(parents=True, exist_ok=True)
 
@@ -90,7 +92,7 @@ def train(
 
     # Surface the non-embedding parameter count (removed from GPT.__init__ print).
     if hasattr(model, "n_params"):
-        print(f"model non_embedding_params={model.n_params:,}")
+        _log.info(f"model non_embedding_params={model.n_params:,}")
 
     # AMP is only supported on CUDA; MPS does not implement GradScaler.
     use_amp = cfg.use_amp and device.type == "cuda"
@@ -201,8 +203,8 @@ def train(
 
         # Gradients are still populated here (zero_grad not called until
         # the next iteration).
-        logger.log_step(step, loss_val, current_lr, model)
-        logger.log_layers(step, model)
+        logger.log_step(step, loss_val, current_lr, layer_norms_dict)
+        logger.log_layers(step, layer_norms_dict, model)
 
         # ── Per-step scalar tracking ──────────────────────────────────────────
         steps_list.append(step)
