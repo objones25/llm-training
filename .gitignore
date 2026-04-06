@@ -1,0 +1,25 @@
+# Environment
+.env
+.venv/
+
+# Generated artifacts
+tokenizer.json
+data/
+checkpoints/
+plots/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Test / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# macOS
+.DS_Store
