@@ -96,14 +96,15 @@ uv run python scripts/run_training.py --train-bin data/train.bin
 
 **Options:**
 
-| Flag               | Default           | Description                            |
-| ------------------ | ----------------- | -------------------------------------- |
-| `--train-bin`      | `data/train.bin`  | Path to the uint16 training token file |
-| `--max-steps`      | `10000`           | Total training steps                   |
-| `--batch-size`     | `32`              | Sequences per batch                    |
-| `--learning-rate`  | `3e-4`            | Peak learning rate (after warmup)      |
-| `--checkpoint-dir` | `checkpoints`     | Directory for checkpoint `.pt` files   |
-| `--plot-dir`       | `plots`           | Directory for saved plot images        |
+| Flag               | Default          | Description                            |
+| ------------------ | ---------------- | -------------------------------------- |
+| `--train-bin`      | `data/train.bin` | Path to the uint16 training token file |
+| `--max-steps`      | `10000`          | Total training steps                   |
+| `--batch-size`     | `32`             | Sequences per batch                    |
+| `--learning-rate`  | `3e-4`           | Peak learning rate (after warmup)      |
+| `--checkpoint-dir` | `checkpoints`    | Directory for checkpoint `.pt` files   |
+| `--plot-dir`       | `plots`          | Directory for saved plot images        |
+| `--device`         | `cpu`            | Training device: `cpu`, `mps`, `cuda`  |
 
 **Example — shorter run with faster learning rate:**
 
@@ -124,6 +125,22 @@ uv run python scripts/run_training.py \
 - Six plot files are updated every `plot_every` steps (default: 500): `loss.png`, `lr.png`, `grad_norm.png`, `grad_heatmap.png`, `weight_norm.png`, `grad_hist.png`.
 
 **Architecture and other hyperparameters** (`n_layers`, `d_model`, `n_heads`, `d_ff`, `warmup_steps`, `weight_decay`, etc.) require editing `src/config.py` directly — they are not exposed as CLI flags.
+
+**Device selection:**
+
+| Device | Flag            | Notes                                                                  |
+| ------ | --------------- | ---------------------------------------------------------------------- |
+| CPU    | `--device cpu`  | Default. Works everywhere, slowest.                                    |
+| MPS    | `--device mps`  | Apple Silicon (M1/M2/M3/M4). Requires macOS ≥13 and PyTorch ≥2.0.      |
+| CUDA   | `--device cuda` | NVIDIA GPU. Use on cloud instances (Lambda Labs, RunPod, Colab, etc.). |
+
+```bash
+# Apple Silicon (M1–M4)
+uv run python scripts/run_training.py --train-bin data/train.bin --device mps
+
+# NVIDIA GPU (cloud)
+uv run python scripts/run_training.py --train-bin data/train.bin --device cuda
+```
 
 ---
 

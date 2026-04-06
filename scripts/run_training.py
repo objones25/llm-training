@@ -75,6 +75,11 @@ def main() -> None:
         default=None,
         help="Override TrainConfig.plot_dir",
     )
+    parser.add_argument(
+        "--device",
+        default=None,
+        help='Training device: "cpu", "mps" (Apple Silicon), or "cuda" (NVIDIA GPU)',
+    )
     args = parser.parse_args()
 
     import numpy as np
@@ -95,6 +100,8 @@ def main() -> None:
         overrides["checkpoint_dir"] = args.checkpoint_dir
     if args.plot_dir is not None:
         overrides["plot_dir"] = args.plot_dir
+    if args.device is not None:
+        overrides["device"] = args.device
     cfg = TrainConfig(**overrides)
 
     # ── Pre-training summary ───────────────────────────────────────────────────
@@ -116,7 +123,7 @@ def main() -> None:
     print(f"config    : {cfg.n_layers}-layer  d_model={cfg.d_model}  n_heads={cfg.n_heads}  "
           f"d_ff={cfg.d_ff}  vocab={cfg.vocab_size}")
     print(f"training  : max_steps={cfg.max_steps:,}  batch_size={cfg.batch_size}  "
-          f"seq_len={cfg.seq_len}  lr={cfg.learning_rate}")
+          f"seq_len={cfg.seq_len}  lr={cfg.learning_rate}  device={cfg.device}")
     print(f"compute   : ~{compute_flops / 1e18:.2f} EFLOPs  "
           f"(N≈{n_params_approx / 1e6:.0f}M non-emb params)")
     print(f"outputs   : checkpoints → {cfg.checkpoint_dir}  plots → {cfg.plot_dir}")

@@ -24,6 +24,9 @@ class TrainConfig:
     dataset_config: str = "sample-10BT"   # subset / config name passed as second arg to load_dataset
     dataset_split: str = "train"
 
+    # Device
+    device: str = "cpu"  # "mps" for Apple Silicon, "cuda" for NVIDIA GPU
+
     # Checkpointing
     checkpoint_dir: str = "checkpoints"
     checkpoint_every: int = 1_000

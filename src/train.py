@@ -75,8 +75,11 @@ def train(
     plot_dir = Path(cfg.plot_dir)
     plot_dir.mkdir(parents=True, exist_ok=True)
 
+    device = torch.device(cfg.device)
+
     if model is None:
         model = GPT(cfg)
+    model = model.to(device)
 
     optimizer = make_optimizer(model, cfg)
     scheduler = make_scheduler(optimizer, cfg)
@@ -114,6 +117,9 @@ def train(
     for step, (inputs, targets) in enumerate(batches):
         if step >= cfg.max_steps:
             break
+
+        inputs = inputs.to(device)
+        targets = targets.to(device)
 
         model.train()
         optimizer.zero_grad()

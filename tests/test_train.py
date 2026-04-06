@@ -49,6 +49,7 @@ def _cfg(tmp_path: Path, **overrides) -> TrainConfig:
         grad_norm_warn_threshold=100.0,
         checkpoint_dir=str(tmp_path / "ckpts"),
         plot_dir=str(tmp_path / "plots"),
+        device="cpu",
     )
     defaults.update(overrides)
     return TrainConfig(**defaults)
