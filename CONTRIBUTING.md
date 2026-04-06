@@ -9,7 +9,7 @@ suggestions — they exist to keep the project debuggable at every stage of deve
 
 Every component must be built in this exact sequence:
 
-```
+```text
 1. Define the interface (function signatures + docstrings, no implementation)
 2. Write the tests (all applicable rules from CLAUDE.md must be covered — they should all fail)
 3. Implement until tests pass
@@ -26,7 +26,7 @@ fact to cover code you already wrote, the PR will be rejected.
 Build components in this sequence. Do not start a component until all tests for the
 previous one pass.
 
-```
+```text
 1.  config.py         — TrainConfig dataclass, no logic
 2.  tokenizer.py      — encode, decode, round-trip fidelity
 3.  model.py          — Transformer forward pass, shape/dtype contracts
@@ -136,17 +136,18 @@ if not torch.isfinite(loss):
 This must appear inside the training loop, every step, before the optimizer step.
 Do not wrap it in a flag that can be disabled.
 
-### `model.py` — init sanity log
+### `model.py` — non-embedding parameter count
 
-The model's `__init__` must log the non-embedding parameter count on construction:
+The model's `__init__` must compute and store the non-embedding parameter count as an attribute:
 
 ```python
-n_params = sum(
+self.n_params = sum(
     p.numel() for name, p in self.named_parameters()
     if "embedding" not in name
 )
-print(f"model non_embedding_params={n_params:,}")
 ```
+
+**Do not print inside `__init__`**. Let `train.py` surface this value on startup by checking `hasattr(model, "n_params")` and printing when training begins. This keeps `__init__` free of side effects and testable in isolation.
 
 ### `scheduler.py` — schedule length guard
 
@@ -185,6 +186,27 @@ import matplotlib.pyplot as plt
 ```
 
 Never use the default backend. Plots must work on a headless SSH session.
+
+### `config.py` — Eager Validation in `__post_init__`
+
+`TrainConfig.__post_init__` validates parameters immediately at construction time and raises `ValueError` if any check fails. This is intentional — it forces invalid configs to fail fast before they can poison downstream logic.
+
+**Critical testing rule:** When testing invalid configs, construct them **inside** `pytest.raises(ValueError)` blocks:
+
+```python
+# CORRECT ✓
+def test_negative_batch_size():
+    with pytest.raises(ValueError, match="batch_size must be positive"):
+        cfg = TrainConfig(batch_size=-1)
+
+# WRONG ✗ — raises before entering the with block
+def test_negative_batch_size():
+    cfg = TrainConfig(batch_size=-1)  # Exception here, before pytest.raises
+    with pytest.raises(ValueError):
+        ...  # Never reached
+```
+
+If you construct an invalid config outside the `pytest.raises` context, the exception is raised during construction and your test fails — pytest never gets to catch it.
 
 ---
 
@@ -238,3 +260,109 @@ A PR will not be merged unless:
 | Putting plot logic in `train.py`         | Untestable, bloated training loop             | All plots live in `plots.py`                  |
 | Putting log formatting in `train.py`     | Same problem                                  | All logging lives in `logger.py`              |
 | Using a display backend for matplotlib   | Crashes on headless SSH                       | Always set `matplotlib.use("Agg")` first      |
+
+---
+
+## Regression Prevention Rules
+
+These rules exist because past code reviews fixed instances of each issue. Do not introduce regressions.
+
+### Rule: Always pass `scheduler=` to checkpoint functions
+
+`save_checkpoint()` and `load_checkpoint()` in `src/checkpoint.py` both accept an optional `scheduler` parameter. **Always pass it when training.**
+
+```python
+# Correct
+save_checkpoint(model, optimizer, step, cfg, scheduler=scheduler)
+load_checkpoint(path, model, optimizer, scheduler=scheduler)
+
+# Wrong — scheduler state is lost, LR trajectory breaks on resume
+save_checkpoint(model, optimizer, step, cfg)  # scheduler omitted
+```
+
+Without this, resuming a run loses the exact LR schedule — the scheduler resets to initial state and training diverges.
+
+**Test coverage:** Rule 12 requires checkpoint tests to verify scheduler state round-trips exactly.
+
+### Rule: Capture gradient norms before clipping
+
+Per-layer gradient norms must be captured **before** `torch.nn.utils.clip_grad_norm_()` is applied. This is the only way to see the true gradient magnitudes.
+
+```python
+# Correct
+layer_norms = {name: p.grad.norm().item() for name, p in model.named_parameters() if p.grad is not None}
+total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip).item()
+
+# Wrong — captures post-clip norms, hides explosion/vanishing signals
+torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+layer_norms = {name: p.grad.norm().item() for name, p in model.named_parameters() if p.grad is not None}
+```
+
+Post-clip norms are useless for diagnostics because they don't tell you what the clipping removed.
+
+### Rule: Call `model.train()` before the training loop, not inside it
+
+```python
+# Correct
+model.train()
+for step, batch in enumerate(batches):
+    ...
+
+# Wrong — inefficient and unclear intent
+for step, batch in enumerate(batches):
+    model.train()
+    ...
+```
+
+Calling `model.train()` once is cheaper, clearer, and prevents accidental mode switches mid-loop.
+
+### Rule: Construct invalid configs inside `pytest.raises()` blocks
+
+Because `TrainConfig.__post_init__` validates eagerly, invalid configs raise `ValueError` at construction time — before any test code can run.
+
+```python
+# Correct
+def test_warmup_exceeds_max_steps():
+    with pytest.raises(ValueError, match="must be less than"):
+        cfg = TrainConfig(max_steps=100, warmup_steps=150)  # Inside the block
+
+# Wrong — exception raised before pytest.raises is entered
+def test_warmup_exceeds_max_steps():
+    cfg = TrainConfig(max_steps=100, warmup_steps=150)  # Exception here
+    with pytest.raises(ValueError):
+        pass  # Never reached
+```
+
+### Rule: Store `model.n_params` as an attribute, not printed in `__init__`
+
+```python
+# Correct (in GPT.__init__)
+self.n_params = sum(p.numel() for name, p in self.named_parameters() if "embedding" not in name)
+
+# Wrong — side effect in __init__
+print(f"model non_embedding_params={n_params:,}")
+```
+
+Then in `train.py`:
+
+```python
+if hasattr(model, "n_params"):
+    print(f"model non_embedding_params={model.n_params:,}")
+```
+
+This keeps `__init__` pure and testable. The training loop is responsible for all observability output.
+
+### Rule: Replace type-ignore comments with assertions
+
+Old code used `# type: ignore[union-attr]` to suppress static analysis errors. New code uses explicit assertions instead:
+
+```python
+# Old (suppress check)
+token_ids = self._tokenizer.encode(text)  # type: ignore[union-attr]
+
+# New (assert precondition)
+assert self._tokenizer is not None
+token_ids = self._tokenizer.encode(text)
+```
+
+Assertions fail fast and give runtime visibility into precondition violations.

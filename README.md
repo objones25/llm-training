@@ -72,7 +72,7 @@ uv run python scripts/pretokenize.py \
 
 **Output files:**
 
-```
+```text
 data/
   train.bin   # ~99% of documents, raw uint16 tokens
   val.bin     #  ~1% of documents, raw uint16 tokens
@@ -126,6 +126,15 @@ uv run python scripts/run_training.py \
 
 **Architecture and other hyperparameters** (`n_layers`, `d_model`, `n_heads`, `d_ff`, `warmup_steps`, `weight_decay`, etc.) require editing `src/config.py` directly — they are not exposed as CLI flags.
 
+**Advanced options in `src/config.py`:**
+
+| Field         | Default      | Purpose                                        |
+| ------------- | ------------ | ---------------------------------------------- |
+| `adamw_betas` | (0.9, 0.999) | AdamW momentum and variance decay rates        |
+| `adamw_eps`   | 1e-8         | AdamW numerical stability constant             |
+| `use_compile` | False        | Enable `torch.compile()` (adds 30-60s startup) |
+| `use_amp`     | False        | Automatic mixed precision (CUDA only)          |
+
 **Device selection:**
 
 | Device | Flag            | Notes                                                                  |
@@ -158,3 +167,29 @@ uv run python -m pytest --cov=src --cov-report=term-missing
 ```
 
 All tests run on CPU with synthetic data — no GPU or network access required.
+
+---
+
+## Checkpoints and Resuming
+
+Checkpoints are saved automatically every `checkpoint_every` steps (default: 1,000) as `checkpoint_NNNNNNN.pt` files in `checkpoint_dir`. Each checkpoint contains:
+
+- Model weights
+- Optimizer state (momentum and variance buffers for AdamW)
+- Scheduler state (current LR schedule position)
+- Training step counter
+- Configuration (`TrainConfig`)
+
+To resume training from a checkpoint, load it and pass the same config plus restored optimizer and scheduler:
+
+```python
+from src.checkpoint import load_checkpoint
+
+step = load_checkpoint("checkpoints/checkpoint_0005000.pt", model, optimizer, scheduler=scheduler)
+cfg.max_steps += 5000  # Extend training by another 5k steps
+train(cfg, model=model, token_stream=resumed_stream)
+```
+
+**Important:** Always pass `scheduler=scheduler` to both `save_checkpoint()` and `load_checkpoint()`. Without it, the LR schedule state is lost and training diverges on resume — the scheduler resets to initial state instead of resuming from where it left off.
+
+Checkpoints created without scheduler state (pre-v2 format) will emit a warning on load and the scheduler will start fresh. New checkpoints always include scheduler state.

@@ -1,0 +1,33 @@
+{
+  "version": "0.2",
+  "words": [
+    "adamw",
+    "Besiroglu",
+    "Checkpointing",
+    "ckpts",
+    "Colab",
+    "CUDA",
+    "dataclass",
+    "docstrings",
+    "dtype",
+    "EFLOPs",
+    "fineweb",
+    "hasattr",
+    "hyperparameters",
+    "isfinite",
+    "Kaplan",
+    "logit",
+    "logits",
+    "matplotlib",
+    "memmap",
+    "numel",
+    "numpy",
+    "pretokenize",
+    "pretraining",
+    "pyproject",
+    "pyplot",
+    "pytest",
+    "Sardana",
+    "tiktoken"
+  ]
+}

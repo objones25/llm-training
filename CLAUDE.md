@@ -12,7 +12,7 @@ Build a small LLM from scratch for learning purposes using `HuggingFaceFW/finewe
 
 All source code lives under `src/`. One module per concern — no exceptions.
 
-```
+```text
 src/
   config.py         # Single source of truth for all hyperparameters
   tokenizer.py      # BPE tokenizer, encode/decode
@@ -63,10 +63,19 @@ class TrainConfig:
     weight_decay: float = 0.1
     grad_clip: float = 1.0
 
+    # Optimizer
+    adamw_betas: tuple[float, float] = (0.9, 0.999)
+    adamw_eps: float = 1e-8
+
     # Data
     dataset_name: str = "HuggingFaceFW/fineweb-edu"
     dataset_config: str = "sample-10BT"   # subset name, second arg to load_dataset
     dataset_split: str = "train"
+
+    # Device and optimization
+    device: str = "cpu"        # "mps" for Apple Silicon, "cuda" for NVIDIA GPU
+    use_compile: bool = False  # torch.compile — opt-in; adds 30-60s cold-start overhead
+    use_amp: bool = False      # Automatic mixed precision — CUDA only
 
     # Checkpointing
     checkpoint_dir: str = "checkpoints"
@@ -78,9 +87,29 @@ class TrainConfig:
     plot_every: int = 500             # cadence for saving plots to disk
     grad_norm_warn_threshold: float = 10.0  # emits WARNING line, does not stop training
     plot_dir: str = "plots"
+
+    def __post_init__(self) -> None:
+        """Validate configuration parameters eagerly at construction time.
+
+        All validation failures raise ValueError immediately, preventing
+        invalid configs from silently poisoning downstream logic.
+        """
+        # (See src/config.py for full validation rules)
 ```
 
 Tests must instantiate `TrainConfig` explicitly with any overrides they need. Never rely on defaults silently.
+
+### Config Validation Rules
+
+`TrainConfig.__post_init__` validates all parameters at construction time:
+
+- `vocab_size`, `batch_size`, `seq_len`, `max_steps` must be positive integers
+- `grad_clip` must be positive
+- `weight_decay` must be non-negative (zero is allowed, disables weight decay)
+- `warmup_steps` must be non-negative AND strictly less than `max_steps`
+- `d_model` must be divisible by `n_heads` (required for multi-head attention)
+
+When testing invalid configs, construct them **inside** `pytest.raises(ValueError)` blocks — never before. If constructed outside the block, the exception is raised immediately and the test fails. See rule 28 below for the correct pattern.
 
 ---
 
@@ -91,16 +120,18 @@ All logging logic lives in `src/logger.py`. `train.py` calls `logger.log_step()`
 
 ### Every step — single line to stdout
 
-```
+```text
 step=100 loss=3.4821 lr=0.000287 grad_norm=1.2341 grad_norm_min=0.0012 grad_norm_max=4.3210
 ```
 
 All six fields are required every step. Format is `key=value` pairs separated by spaces.
 
+**Important:** All per-layer gradient norms logged here are captured **before** `torch.nn.utils.clip_grad_norm_()` is applied. This is intentional — you must see the true gradient magnitudes before clipping to diagnose instability.
+
 If any single layer's gradient norm exceeds `grad_norm_warn_threshold`, emit an additional
 WARNING line immediately after:
 
-```
+```text
 WARNING step=100 layer=transformer.block.5.attn.q_proj grad_norm=14.3201 exceeds threshold=10.0
 ```
 
@@ -108,16 +139,18 @@ Training continues — this is observability, not a hard stop.
 
 ### Every `grad_log_every` steps — per-layer gradient norms
 
-```
+```text
 grad step=100 layer=transformer.block.0.attn.q_proj norm=0.3821
 grad step=100 layer=transformer.block.0.attn.v_proj norm=0.3714
 grad step=100 layer=transformer.block.5.attn.q_proj norm=4.2910
 grad step=100 layer=transformer.block.5.ff.w2       norm=0.0003
 ```
 
+These norms are also **pre-clip**. Compare these values over time to detect vanishing or exploding gradients by layer.
+
 ### Every `weight_log_every` steps — per-layer weight norms
 
-```
+```text
 weight step=500 layer=transformer.block.0.attn.q_proj norm=1.2341
 weight step=500 layer=transformer.block.5.ff.w2       norm=0.9821
 ```
@@ -208,7 +241,7 @@ Run this before any full training job. Do not skip steps.
 
 ### Parametric Loss Target (Epoch AI corrected Chinchilla)
 
-```
+```text
 L(N, D) = 1.8172 + 482.01 / N^0.3478 + 2085.43 / D^0.3658
 ```
 
@@ -219,7 +252,7 @@ Use this — not the original rounded Chinchilla values — when estimating expe
 
 ## Testing Rules (Non-Negotiable)
 
-All 26 rules below must be followed for every component. See `CONTRIBUTING.md` for when
+All 28 rules below must be followed for every component. See `CONTRIBUTING.md` for when
 each test gets written.
 
 1. Every training component has a corresponding `test_` prefixed test file.
@@ -233,7 +266,7 @@ each test gets written.
 9. DataLoader tests assert no batch contains padding-only sequences and token IDs are within vocab bounds.
 10. Training step tests assert gradients are non-None, non-zero, and contain **no `nan` or `inf` values** for every named parameter after backward.
 11. Optimizer and scheduler state must be saveable/loadable with exact match on a subsequent step's loss.
-12. Checkpoint tests assert identical logits before save and after load.
+12. Checkpoint tests assert identical logits before save and after load. Scheduler state must round-trip exactly when passed to `save_checkpoint` and `load_checkpoint`.
 13. Every function with a numeric output has a test asserting output shape and dtype explicitly.
 14. Cosine schedule tests assert: LR at step 0 == warmup start, peaks at configured max, near-zero at `max_steps`.
 15. Tests touching randomness set a fixed seed **in the test body**, not in a fixture.
@@ -248,6 +281,8 @@ each test gets written.
 24. A test must assert that `GradientLogger.log_layers()` emits per-layer lines to stdout for every named parameter, at the correct step cadence, using a fixed synthetic model.
 25. A test must assert that a `WARNING` line is emitted (not an exception) when any layer's gradient norm exceeds `grad_norm_warn_threshold`.
 26. Plot tests must assert that each plot function produces a valid, non-empty `.png` file at the expected path — use synthetic data passed directly to the plot function, do not run a training loop.
+27. `TrainConfig` must have a dedicated test file (`test_config.py`) with comprehensive coverage of all `__post_init__` validation rules. Each invalid config must be constructed **inside** `pytest.raises(ValueError)`, never before it.
+28. Model initialization must store the non-embedding parameter count as `model.n_params` (an attribute). Tests must assert `model.n_params` exists and is equal to the manually computed count. Do not print parameter counts in `__init__` — let `train.py` surface this value.
 
 ---
 
@@ -305,6 +340,70 @@ each test gets written.
 | transformers | 4.40            |
 | tiktoken     | 0.6             |
 | matplotlib   | 3.8             |
+
+---
+
+---
+
+## Implementation Details & Contracts
+
+### Checkpoint State Preservation
+
+`save_checkpoint()` and `load_checkpoint()` in `src/checkpoint.py` now **require** passing the scheduler parameter to preserve LR trajectory:
+
+```python
+# Saving
+save_checkpoint(model, optimizer, step, cfg, scheduler=scheduler)
+
+# Loading
+load_checkpoint(path, model, optimizer, scheduler=scheduler)
+```
+
+If you resume training without passing `scheduler=`, the scheduler starts from its initial state and LR will diverge from the original run — defeating the purpose of resuming. This is a **required pattern**, not optional.
+
+### Attention Mechanism
+
+`CausalSelfAttention` in `src/model.py` uses `torch.nn.functional.scaled_dot_product_attention()` with `is_causal=True`. This enables:
+
+- FlashAttention-2 on CUDA (hardware-accelerated, memory-efficient)
+- Correct causal masking on all backends
+- Deterministic behavior (no custom mask buffer juggling)
+
+### Gradient Norm Logging — Pre-Clip Timing
+
+All gradient norms logged (both total and per-layer) are computed **before** `torch.nn.utils.clip_grad_norm_()` is applied. This is intentional and critical:
+
+- Pre-clip norms reveal the true state of gradients
+- Post-clip norms would hide the magnitude of instability that was clipped away
+- You cannot diagnose vanishing or exploding gradients from post-clip values
+
+The training loop captures per-layer norms in a dictionary before clipping, then clips, then logs.
+
+### Model Parameter Count Attribute
+
+`GPT.__init__()` computes non-embedding parameter count and stores it as `self.n_params` (integer attribute). The `train.py` function surfaces this on startup:
+
+```python
+if hasattr(model, "n_params"):
+    print(f"model non_embedding_params={model.n_params:,}")
+```
+
+Do **not** print this inside `GPT.__init__()` — let the training loop decide when and how to display it.
+
+### Device and Optimization Flags
+
+- `use_compile: bool` — opt-in `torch.compile()` with "reduce-overhead" mode. Adds 30-60s startup cost.
+- `use_amp: bool` — automatic mixed precision. Only works on CUDA; gracefully disabled on CPU/MPS.
+
+### Training Loop Structure
+
+Key ordering:
+
+1. `model.train()` is called **once** before the loop, not per-step
+2. Gradient norms are captured **before** `clip_grad_norm_()`
+3. Total norm is obtained directly from the return value of `clip_grad_norm_()`
+4. Loss NaN check happens immediately after loss computation, before backward
+5. Scheduler step is called after optimizer step (standard PyTorch pattern)
 
 ---
 
