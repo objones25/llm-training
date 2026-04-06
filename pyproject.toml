@@ -27,6 +27,11 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short"
+filterwarnings = [
+    # In scheduler unit tests we call scheduler.step() without optimizer.step()
+    # intentionally (we only want to read the LR, not run training steps).
+    "ignore:Detected call of `lr_scheduler.step\\(\\)` before `optimizer.step\\(\\)`",
+]
 
 [dependency-groups]
 dev = [

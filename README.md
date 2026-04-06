@@ -84,6 +84,49 @@ Each file is a flat sequence of `uint16` values. At `seq_len=512` and `vocab_siz
 
 ---
 
+### 3. Run the training loop
+
+Reads from the pre-tokenized binary file and runs the full pretraining loop. Checkpoints are saved to `checkpoints/` and plots to `plots/` by default.
+
+Requires a binary dataset from step 2.
+
+```bash
+uv run python scripts/run_training.py --train-bin data/train.bin
+```
+
+**Options:**
+
+| Flag               | Default           | Description                            |
+| ------------------ | ----------------- | -------------------------------------- |
+| `--train-bin`      | `data/train.bin`  | Path to the uint16 training token file |
+| `--max-steps`      | `10000`           | Total training steps                   |
+| `--batch-size`     | `32`              | Sequences per batch                    |
+| `--learning-rate`  | `3e-4`            | Peak learning rate (after warmup)      |
+| `--checkpoint-dir` | `checkpoints`     | Directory for checkpoint `.pt` files   |
+| `--plot-dir`       | `plots`           | Directory for saved plot images        |
+
+**Example — shorter run with faster learning rate:**
+
+```bash
+uv run python scripts/run_training.py \
+    --train-bin data/train.bin \
+    --max-steps 5000 \
+    --learning-rate 1e-3 \
+    --checkpoint-dir runs/exp1/ckpts \
+    --plot-dir runs/exp1/plots
+```
+
+**Output:**
+
+- A summary line is printed before training starts (token count, model size, estimated compute in EFLOPs).
+- Per-step log lines are written to stdout: `step=N loss=X.XXXX lr=X.Xe-XX grad_norm=X.XXXX ...`
+- Checkpoints are saved as `checkpoint_NNNNNNN.pt` (7-digit zero-padded step number) every `checkpoint_every` steps (default: 1,000).
+- Six plot files are updated every `plot_every` steps (default: 500): `loss.png`, `lr.png`, `grad_norm.png`, `grad_heatmap.png`, `weight_norm.png`, `grad_hist.png`.
+
+**Architecture and other hyperparameters** (`n_layers`, `d_model`, `n_heads`, `d_ff`, `warmup_steps`, `weight_decay`, etc.) require editing `src/config.py` directly — they are not exposed as CLI flags.
+
+---
+
 ## Running tests
 
 ```bash
