@@ -134,29 +134,31 @@ def test_mid_cosine_lr_is_half_peak(optimizer: torch.optim.Optimizer, cfg: Train
 
 
 def test_raises_if_warmup_equals_max_steps(cfg: TrainConfig) -> None:
-    """ValueError when warmup_steps == max_steps (no cosine phase)."""
-    param = torch.nn.Parameter(torch.zeros(4))
-    opt = torch.optim.AdamW([param], lr=cfg.learning_rate)
-    bad_cfg = TrainConfig(
-        warmup_steps=cfg.max_steps,
-        max_steps=cfg.max_steps,
-        n_layers=2, d_model=64, n_heads=2, d_ff=128, vocab_size=256,
-    )
+    """ValueError when warmup_steps == max_steps (no cosine phase).
+
+    TrainConfig.__post_init__ validates this eagerly, so the error is raised
+    at config construction time rather than inside make_scheduler.
+    """
     with pytest.raises(ValueError):
-        make_scheduler(opt, bad_cfg)
+        TrainConfig(
+            warmup_steps=cfg.max_steps,
+            max_steps=cfg.max_steps,
+            n_layers=2, d_model=64, n_heads=2, d_ff=128, vocab_size=256,
+        )
 
 
 def test_raises_if_warmup_exceeds_max_steps(cfg: TrainConfig) -> None:
-    """ValueError when warmup_steps > max_steps."""
-    param = torch.nn.Parameter(torch.zeros(4))
-    opt = torch.optim.AdamW([param], lr=cfg.learning_rate)
-    bad_cfg = TrainConfig(
-        warmup_steps=cfg.max_steps + 1,
-        max_steps=cfg.max_steps,
-        n_layers=2, d_model=64, n_heads=2, d_ff=128, vocab_size=256,
-    )
+    """ValueError when warmup_steps > max_steps.
+
+    TrainConfig.__post_init__ validates this eagerly, so the error is raised
+    at config construction time rather than inside make_scheduler.
+    """
     with pytest.raises(ValueError):
-        make_scheduler(opt, bad_cfg)
+        TrainConfig(
+            warmup_steps=cfg.max_steps + 1,
+            max_steps=cfg.max_steps,
+            n_layers=2, d_model=64, n_heads=2, d_ff=128, vocab_size=256,
+        )
 
 
 # ── State save / load (CLAUDE.md rule 11) ─────────────────────────────────────

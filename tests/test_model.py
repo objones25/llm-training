@@ -108,15 +108,16 @@ def test_weight_tying(model: GPT) -> None:
     assert model.lm_head.weight is model.token_embedding.weight
 
 
-def test_init_prints_param_count(cfg: TrainConfig, capsys: pytest.CaptureFixture) -> None:
-    """__init__ must print the non-embedding param count (CONTRIBUTING.md guard)."""
+def test_init_stores_param_count(cfg: TrainConfig) -> None:
+    """GPT.__init__ must store non-embedding param count as model.n_params (rule 21)."""
     torch.manual_seed(3)
-    GPT(cfg)
-    captured = capsys.readouterr()
-    assert "model non_embedding_params=" in captured.out
+    model = GPT(cfg)
+    assert hasattr(model, "n_params"), "GPT must expose n_params attribute"
+    assert isinstance(model.n_params, int)
+    assert model.n_params > 0
 
 
-def test_non_embedding_param_count_value(cfg: TrainConfig, capsys: pytest.CaptureFixture) -> None:
+def test_non_embedding_param_count_value(cfg: TrainConfig) -> None:
     """Non-embedding N must match the analytic formula (rule 13).
 
     Per block:
@@ -131,8 +132,7 @@ def test_non_embedding_param_count_value(cfg: TrainConfig, capsys: pytest.Captur
     lm_head.weight is weight-tied — not double-counted.
     """
     torch.manual_seed(4)
-    GPT(cfg)
-    captured = capsys.readouterr()
+    model = GPT(cfg)
 
     expected = cfg.n_layers * (
         3 * cfg.d_model ** 2          # qkv
@@ -141,8 +141,8 @@ def test_non_embedding_param_count_value(cfg: TrainConfig, capsys: pytest.Captur
         + 4 * cfg.d_model             # ln_1 weight+bias, ln_2 weight+bias
     ) + 2 * cfg.d_model               # ln_f weight+bias
 
-    assert f"model non_embedding_params={expected:,}" in captured.out, (
-        f"Expected {expected:,} non-embedding params. Got: {captured.out.strip()}"
+    assert model.n_params == expected, (
+        f"Expected {expected:,} non-embedding params, got {model.n_params:,}"
     )
 
 
@@ -197,14 +197,17 @@ def test_short_sequence(model: GPT, cfg: TrainConfig) -> None:
 
 
 def test_n_heads_assertion(cfg: TrainConfig) -> None:
-    """GPT must raise AssertionError when d_model is not divisible by n_heads."""
-    bad_cfg = TrainConfig(
-        vocab_size=cfg.vocab_size,
-        n_layers=cfg.n_layers,
-        d_model=64,
-        n_heads=3,  # 64 % 3 != 0
-        d_ff=cfg.d_ff,
-        seq_len=cfg.seq_len,
-    )
-    with pytest.raises(AssertionError):
-        GPT(bad_cfg)
+    """ValueError must be raised when d_model is not divisible by n_heads.
+
+    __post_init__ in TrainConfig validates this at construction time, so the
+    error is raised before GPT() is ever called.
+    """
+    with pytest.raises(ValueError, match="d_model"):
+        TrainConfig(
+            vocab_size=cfg.vocab_size,
+            n_layers=cfg.n_layers,
+            d_model=64,
+            n_heads=3,  # 64 % 3 != 0
+            d_ff=cfg.d_ff,
+            seq_len=cfg.seq_len,
+        )

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 
@@ -19,6 +21,10 @@ class TrainConfig:
     weight_decay: float = 0.1
     grad_clip: float = 1.0
 
+    # Optimizer
+    adamw_betas: tuple[float, float] = (0.9, 0.999)
+    adamw_eps: float = 1e-8
+
     # Data
     dataset_name: str = "HuggingFaceFW/fineweb-edu"
     dataset_config: str = "sample-10BT"   # subset / config name passed as second arg to load_dataset
@@ -26,6 +32,8 @@ class TrainConfig:
 
     # Device
     device: str = "cpu"  # "mps" for Apple Silicon, "cuda" for NVIDIA GPU
+    use_compile: bool = False  # torch.compile — opt-in; adds 30-60s cold-start overhead
+    use_amp: bool = False      # Automatic mixed precision — CUDA only; MPS does not support GradScaler
 
     # Checkpointing
     checkpoint_dir: str = "checkpoints"
@@ -37,3 +45,28 @@ class TrainConfig:
     plot_every: int = 500
     grad_norm_warn_threshold: float = 10.0
     plot_dir: str = "plots"
+
+    def __post_init__(self) -> None:
+        if self.vocab_size <= 0:
+            raise ValueError(f"vocab_size must be positive, got {self.vocab_size}")
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size must be positive, got {self.batch_size}")
+        if self.seq_len <= 0:
+            raise ValueError(f"seq_len must be positive, got {self.seq_len}")
+        if self.max_steps <= 0:
+            raise ValueError(f"max_steps must be positive, got {self.max_steps}")
+        if self.grad_clip <= 0:
+            raise ValueError(f"grad_clip must be positive, got {self.grad_clip}")
+        if self.weight_decay < 0:
+            raise ValueError(f"weight_decay must be non-negative, got {self.weight_decay}")
+        if self.warmup_steps < 0:
+            raise ValueError(f"warmup_steps must be non-negative, got {self.warmup_steps}")
+        if self.warmup_steps >= self.max_steps:
+            raise ValueError(
+                f"warmup_steps ({self.warmup_steps}) must be less than "
+                f"max_steps ({self.max_steps})"
+            )
+        if self.d_model % self.n_heads != 0:
+            raise ValueError(
+                f"d_model ({self.d_model}) must be divisible by n_heads ({self.n_heads})"
+            )

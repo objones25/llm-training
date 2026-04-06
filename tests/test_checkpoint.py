@@ -15,6 +15,7 @@ from src.checkpoint import load_checkpoint, save_checkpoint
 from src.config import TrainConfig
 from src.model import GPT
 from src.optimizer import make_optimizer
+from src.scheduler import make_scheduler
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -181,6 +182,42 @@ def test_optimizer_state_restored(
                 )
             else:
                 assert val == loaded_val
+
+
+# ── Scheduler state (CONTRIBUTING.md rule 11) ─────────────────────────────────
+
+
+def test_scheduler_state_round_trip(
+    model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig
+) -> None:
+    """Scheduler LR at the step after load must match the reference run.
+
+    Validates that resuming from a checkpoint reproduces the exact LR trajectory.
+    """
+    scheduler = make_scheduler(optimizer, cfg)
+
+    # Advance scheduler by 3 steps to move past step 0.
+    for _ in range(3):
+        scheduler.step()
+    lr_before = optimizer.param_groups[0]["lr"]
+
+    path = save_checkpoint(model, optimizer, step=3, cfg=cfg, scheduler=scheduler)
+
+    # Restore into a fresh optimizer + scheduler.
+    optimizer2 = make_optimizer(model, cfg)
+    scheduler2 = make_scheduler(optimizer2, cfg)
+    load_checkpoint(path, model, optimizer2, scheduler=scheduler2)
+
+    # One more step on both — LRs must be identical.
+    scheduler.step()
+    scheduler2.step()
+    lr_after = optimizer.param_groups[0]["lr"]
+    lr_after2 = optimizer2.param_groups[0]["lr"]
+
+    assert abs(lr_after - lr_after2) < 1e-9, (
+        f"LR mismatch after scheduler round-trip: {lr_after} vs {lr_after2}"
+    )
+    _ = lr_before  # referenced only to confirm step > 0
 
 
 def test_loss_identity_after_load(

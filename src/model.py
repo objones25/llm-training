@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from src.config import TrainConfig
 
@@ -52,10 +53,8 @@ class CausalSelfAttention(nn.Module):
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=False)
         self.out_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
 
-        # Causal mask: lower-triangular ones, shape (seq_len, seq_len).
-        # Sliced to [:T, :T] in forward to handle T < seq_len.
-        mask = torch.tril(torch.ones(cfg.seq_len, cfg.seq_len))
-        self.register_buffer("mask", mask)
+        # No mask buffer needed: F.scaled_dot_product_attention handles the
+        # causal mask internally when is_causal=True.
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -78,14 +77,10 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
 
-        # Scaled dot-product attention with causal mask
-        scale = self.head_dim ** -0.5
-        attn = (q @ k.transpose(-2, -1)) * scale  # (B, n_heads, T, T)
-        attn = attn.masked_fill(self.mask[:T, :T] == 0, float("-inf"))
-        attn = torch.softmax(attn, dim=-1)
-
-        # Weighted sum over values
-        out = attn @ v  # (B, n_heads, T, head_dim)
+        # Scaled dot-product attention with causal mask.
+        # PyTorch 2.0+ dispatches to FlashAttention-2 on CUDA automatically.
+        out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        # (B, n_heads, T, head_dim)
         out = out.transpose(1, 2).contiguous().view(B, T, C)  # (B, T, d_model)
         return self.out_proj(out)
 
@@ -193,16 +188,16 @@ class GPT(nn.Module):
         # language model training (see Press & Wolf, 2017).
         self.lm_head.weight = self.token_embedding.weight
 
-        # Required guard (CONTRIBUTING.md): log non-embedding parameter count.
+        # Store non-embedding parameter count as an attribute.
         # The "embedding" filter correctly excludes token_embedding.weight
         # (yielded under that name) and position_embedding.weight.
         # lm_head.weight is the same tensor — deduplicated, not double-counted.
-        n_params = sum(
+        # Surfaced by train.py so the model itself does not print.
+        self.n_params: int = sum(
             p.numel()
             for name, p in self.named_parameters()
             if "embedding" not in name
         )
-        print(f"model non_embedding_params={n_params:,}")
 
     def forward(self, idx: torch.Tensor) -> torch.Tensor:
         """

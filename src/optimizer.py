@@ -69,4 +69,9 @@ def make_optimizer(
         {"params": decay, "weight_decay": cfg.weight_decay},
         {"params": no_decay, "weight_decay": 0.0},
     ]
-    return torch.optim.AdamW(param_groups, lr=cfg.learning_rate)
+    return torch.optim.AdamW(
+        param_groups,
+        lr=cfg.learning_rate,
+        betas=cfg.adamw_betas,
+        eps=cfg.adamw_eps,
+    )

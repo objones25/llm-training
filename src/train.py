@@ -20,7 +20,7 @@ Public API
 """
 from __future__ import annotations
 
-import math
+import warnings
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -81,9 +81,20 @@ def train(
         model = GPT(cfg)
     model = model.to(device)
 
+    if cfg.use_compile:
+        model = torch.compile(model, mode="reduce-overhead")  # type: ignore[assignment]
+
     optimizer = make_optimizer(model, cfg)
     scheduler = make_scheduler(optimizer, cfg)
     logger = GradientLogger(cfg)
+
+    # Surface the non-embedding parameter count (removed from GPT.__init__ print).
+    if hasattr(model, "n_params"):
+        print(f"model non_embedding_params={model.n_params:,}")
+
+    # AMP is only supported on CUDA; MPS does not implement GradScaler.
+    use_amp = cfg.use_amp and device.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
     if token_stream is None:
         from src.dataset import stream_documents
@@ -114,6 +125,10 @@ def train(
     weight_heatmap_rows: list[list[float]] = []
     latest_grad_norms: list[float] = []
 
+    # model.train() is set once before the loop — not repeated per step.
+    model.train()
+
+    step = -1
     for step, (inputs, targets) in enumerate(batches):
         if step >= cfg.max_steps:
             break
@@ -121,23 +136,65 @@ def train(
         inputs = inputs.to(device)
         targets = targets.to(device)
 
-        model.train()
         optimizer.zero_grad()
 
-        logits = model(inputs)
-        loss = F.cross_entropy(logits.reshape(-1, cfg.vocab_size), targets.reshape(-1))
+        if use_amp and scaler is not None:
+            with torch.amp.autocast("cuda"):
+                logits = model(inputs)
+                loss = F.cross_entropy(
+                    logits.reshape(-1, cfg.vocab_size), targets.reshape(-1)
+                )
 
-        if not torch.isfinite(loss):
-            raise RuntimeError(
-                f"Loss is {loss.item()} at step {step}. Aborting."
+            if not torch.isfinite(loss):
+                raise RuntimeError(
+                    f"Loss is {loss.item()} at step {step}. Aborting."
+                )
+
+            scaler.scale(loss).backward()
+
+            # Unscale before clipping so clip threshold is in original units.
+            scaler.unscale_(optimizer)
+
+            # Capture pre-clip per-layer norms BEFORE clip_grad_norm_ fires.
+            layer_norms_dict: dict[str, float] = {
+                name: p.grad.norm().item()
+                for name, p in model.named_parameters()
+                if p.grad is not None
+            }
+            grad_norm_total = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), cfg.grad_clip
+            ).item()
+
+            current_lr = optimizer.param_groups[0]["lr"]
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            logits = model(inputs)
+            loss = F.cross_entropy(
+                logits.reshape(-1, cfg.vocab_size), targets.reshape(-1)
             )
 
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+            if not torch.isfinite(loss):
+                raise RuntimeError(
+                    f"Loss is {loss.item()} at step {step}. Aborting."
+                )
 
-        # Capture the LR used for this step before the scheduler advances it.
-        current_lr = optimizer.param_groups[0]["lr"]
-        optimizer.step()
+            loss.backward()
+
+            # Capture pre-clip per-layer norms BEFORE clip_grad_norm_ fires.
+            layer_norms_dict = {
+                name: p.grad.norm().item()
+                for name, p in model.named_parameters()
+                if p.grad is not None
+            }
+            # clip_grad_norm_ returns the total pre-clip norm — reuse it directly.
+            grad_norm_total = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), cfg.grad_clip
+            ).item()
+
+            current_lr = optimizer.param_groups[0]["lr"]
+            optimizer.step()
+
         scheduler.step()
 
         loss_val = loss.item()
@@ -152,14 +209,8 @@ def train(
         losses_list.append(loss_val)
         lrs_list.append(current_lr)
 
-        layer_norms_dict: dict[str, float] = {
-            name: p.grad.norm().item()
-            for name, p in model.named_parameters()
-            if p.grad is not None
-        }
         if layer_norms_dict:
             norms = list(layer_norms_dict.values())
-            grad_norm_total = math.sqrt(sum(n * n for n in norms))
             grad_norm_min = min(norms)
             grad_norm_max = max(norms)
             latest_grad_norms = norms
@@ -222,6 +273,18 @@ def train(
 
         # ── Checkpoint ────────────────────────────────────────────────────────
         if (step + 1) % cfg.checkpoint_every == 0:
-            save_checkpoint(model, optimizer, step + 1, cfg)
+            save_checkpoint(model, optimizer, step + 1, cfg, scheduler=scheduler)
+
+    # ── Token stream exhaustion guard ──────────────────────────────────────────
+    # If the loop exits before reaching max_steps, the token stream was shorter
+    # than expected. Warn so the caller knows training was cut short.
+    steps_completed = step + 1 if step >= 0 else 0
+    if steps_completed < cfg.max_steps:
+        warnings.warn(
+            f"Token stream exhausted after {steps_completed} steps; "
+            f"requested {cfg.max_steps}. Training was cut short.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return model

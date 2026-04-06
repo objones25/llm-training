@@ -66,6 +66,8 @@ def make_scheduler(
 
     def lr_lambda(step: int) -> float:
         if step < cfg.warmup_steps:
+            # LR is exactly 0 at step 0 — intentional. Warmup ramps linearly
+            # from 0 to cfg.learning_rate over warmup_steps steps.
             return step / cfg.warmup_steps
         progress = (step - cfg.warmup_steps) / (cfg.max_steps - cfg.warmup_steps)
         return 0.5 * (1.0 + math.cos(math.pi * progress))

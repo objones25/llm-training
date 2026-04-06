@@ -63,24 +63,28 @@ class BPETokenizer:
     def encode(self, text: str) -> list[int]:
         """Encode *text* to a list of integer token IDs."""
         self._require_trained()
-        return self._tokenizer.encode(text).ids  # type: ignore[union-attr]
+        assert self._tokenizer is not None
+        return self._tokenizer.encode(text).ids
 
     def decode(self, ids: list[int], *, skip_special_tokens: bool = True) -> str:
         """Decode a list of token IDs back to a string."""
         self._require_trained()
-        return self._tokenizer.decode(ids, skip_special_tokens=skip_special_tokens)  # type: ignore[union-attr]
+        assert self._tokenizer is not None
+        return self._tokenizer.decode(ids, skip_special_tokens=skip_special_tokens)
 
     def encode_batch(self, texts: list[str]) -> list[list[int]]:
         """Encode a batch of strings. Equivalent to ``[encode(t) for t in texts]``."""
         self._require_trained()
-        return [enc.ids for enc in self._tokenizer.encode_batch(texts)]  # type: ignore[union-attr]
+        assert self._tokenizer is not None
+        return [enc.ids for enc in self._tokenizer.encode_batch(texts)]
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
     def save(self, path: str) -> None:
         """Serialise the tokenizer to a JSON file at *path*."""
         self._require_trained()
-        self._tokenizer.save(path)  # type: ignore[union-attr]
+        assert self._tokenizer is not None
+        self._tokenizer.save(path)
 
     @classmethod
     def load(cls, path: str) -> BPETokenizer:
@@ -95,12 +99,14 @@ class BPETokenizer:
     def vocab_size(self) -> int:
         """Number of tokens in the vocabulary (including special tokens)."""
         self._require_trained()
-        return self._tokenizer.get_vocab_size()  # type: ignore[union-attr]
+        assert self._tokenizer is not None
+        return self._tokenizer.get_vocab_size()
 
     def token_to_id(self, token: str) -> int:
         """Return the integer ID for *token*. Raises ``KeyError`` if absent."""
         self._require_trained()
-        id_ = self._tokenizer.token_to_id(token)  # type: ignore[union-attr]
+        assert self._tokenizer is not None
+        id_ = self._tokenizer.token_to_id(token)
         if id_ is None:
             raise KeyError(f"Token {token!r} not in vocabulary.")
         return id_
