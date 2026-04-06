@@ -86,6 +86,12 @@ def main() -> None:
         help="Path to the uint16 validation token file (default: data/val.bin). "
              "Skipped if the file does not exist.",
     )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=None,
+        help="Override TrainConfig.early_stopping_patience (0 = disabled)",
+    )
     args = parser.parse_args()
 
     import numpy as np
@@ -108,6 +114,8 @@ def main() -> None:
         overrides["plot_dir"] = args.plot_dir
     if args.device is not None:
         overrides["device"] = args.device
+    if args.early_stopping_patience is not None:
+        overrides["early_stopping_patience"] = args.early_stopping_patience
     cfg = TrainConfig(**overrides)
 
     # ── Pre-training summary ───────────────────────────────────────────────────
