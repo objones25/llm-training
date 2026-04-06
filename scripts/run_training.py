@@ -80,6 +80,12 @@ def main() -> None:
         default=None,
         help='Training device: "cpu", "mps" (Apple Silicon), or "cuda" (NVIDIA GPU)',
     )
+    parser.add_argument(
+        "--val-bin",
+        default="data/val.bin",
+        help="Path to the uint16 validation token file (default: data/val.bin). "
+             "Skipped if the file does not exist.",
+    )
     args = parser.parse_args()
 
     import numpy as np
@@ -119,7 +125,16 @@ def main() -> None:
     )
     compute_flops = 6 * n_params_approx * tokens_per_step * cfg.max_steps
 
+    val_bin = Path(args.val_bin)
+    val_stream = _token_stream(val_bin) if val_bin.exists() else None
+
     print(f"train.bin : {n_tokens:,} tokens  ({train_bin.stat().st_size / 1e9:.2f} GB)")
+    if val_stream is not None:
+        val_n_tokens = len(np.memmap(val_bin, dtype="<u2", mode="r"))
+        print(f"val.bin   : {val_n_tokens:,} tokens  ({val_bin.stat().st_size / 1e6:.1f} MB)  "
+              f"val_every={cfg.val_every}  val_batches={cfg.val_batches}")
+    else:
+        print("val.bin   : not found — validation loss disabled")
     print(f"config    : {cfg.n_layers}-layer  d_model={cfg.d_model}  n_heads={cfg.n_heads}  "
           f"d_ff={cfg.d_ff}  vocab={cfg.vocab_size}")
     print(f"training  : max_steps={cfg.max_steps:,}  batch_size={cfg.batch_size}  "
@@ -133,7 +148,7 @@ def main() -> None:
 
     from src.train import train
 
-    train(cfg, token_stream=_token_stream(train_bin))
+    train(cfg, token_stream=_token_stream(train_bin), val_token_stream=val_stream)
 
     print()
     print("Training complete.")

@@ -11,7 +11,7 @@ This is enforced here at module level per CONTRIBUTING.md.
 
 Public API
 ----------
-    plot_loss(steps, losses, path)
+    plot_loss(steps, losses, path, val_steps=None, val_losses=None)
     plot_lr(steps, lrs, path)
     plot_grad_norm(steps, grad_norms, grad_norm_mins, grad_norm_maxs, path)
     plot_grad_heatmap(steps, layer_names, norms_matrix, path)
@@ -37,8 +37,14 @@ def plot_loss(
     steps: Sequence[int],
     losses: Sequence[float],
     path: Path | str,
+    val_steps: Sequence[int] | None = None,
+    val_losses: Sequence[float] | None = None,
 ) -> None:
     """Save loss-vs-step curve (log Y scale) to *path*.
+
+    When *val_steps* and *val_losses* are provided, the validation loss is
+    overlaid on the same axes so train/val divergence (overfitting) is
+    immediately visible.
 
     Parameters
     ----------
@@ -46,9 +52,17 @@ def plot_loss(
     losses : Sequence[float]
     path : Path | str
         Destination file; created or overwritten in place.
+    val_steps : Sequence[int] | None
+        Steps at which validation loss was evaluated.  ``None`` omits the
+        validation curve.
+    val_losses : Sequence[float] | None
+        Validation loss values corresponding to *val_steps*.
     """
     fig, ax = plt.subplots()
-    ax.plot(steps, losses)
+    ax.plot(steps, losses, label="train")
+    if val_steps is not None and val_losses is not None and len(val_steps) > 0:
+        ax.plot(val_steps, val_losses, label="val", linestyle="--")
+        ax.legend()
     ax.set_yscale("log")
     ax.set_xlabel("step")
     ax.set_ylabel("loss")

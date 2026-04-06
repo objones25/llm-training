@@ -48,6 +48,7 @@ def train(
     cfg: TrainConfig,
     model: GPT | None = None,
     token_stream: Iterable[int] | None = None,
+    val_token_stream: Iterable[int] | None = None,
 ) -> GPT:
     """Run the pretraining loop for up to ``cfg.max_steps`` steps.
 
@@ -61,6 +62,10 @@ def train(
         from HuggingFace (``cfg.dataset_name``) and tokenizes with a
         ``BPETokenizer`` loaded from ``'tokenizer.model'`` in the current
         working directory.
+    val_token_stream : Iterable[int] | None
+        Pre-tokenized validation token IDs.  Consumed eagerly at startup into
+        fixed batches; evaluated every ``cfg.val_every`` steps when provided.
+        When ``None`` or ``cfg.val_every == 0``, validation is skipped.
 
     Returns
     -------
@@ -112,6 +117,14 @@ def train(
 
     batches = make_batches(token_stream, cfg)
 
+    # ── Validation batches — consumed eagerly so the same data is reused ─────
+    # Consuming upfront means every val evaluation sees identical inputs,
+    # making val loss comparable across steps.
+    _val_batches: list[tuple[torch.Tensor, torch.Tensor]] = []
+    if val_token_stream is not None and cfg.val_every > 0:
+        _val_batches = list(make_batches(val_token_stream, cfg))
+        _log.info(f"val_batches loaded: {len(_val_batches)} batches")
+
     # ── Accumulated data for plots ────────────────────────────────────────────
     steps_list: list[int] = []
     losses_list: list[float] = []
@@ -119,6 +132,8 @@ def train(
     grad_norms_list: list[float] = []
     grad_norm_mins_list: list[float] = []
     grad_norm_maxs_list: list[float] = []
+    val_steps_list: list[int] = []
+    val_losses_list: list[float] = []
 
     layer_names: list[str] | None = None
     grad_heatmap_steps: list[int] = []
@@ -245,9 +260,35 @@ def train(
                 [weight_norms_dict.get(n, 0.0) for n in layer_names]
             )
 
+        # ── Validation loss ───────────────────────────────────────────────────
+        if (
+            _val_batches
+            and cfg.val_every > 0
+            and step % cfg.val_every == 0
+        ):
+            with torch.no_grad():
+                model.eval()
+                val_loss_total = 0.0
+                n_val = min(cfg.val_batches, len(_val_batches))
+                for val_inputs, val_targets in _val_batches[:n_val]:
+                    val_logits = model(val_inputs.to(device))
+                    val_loss_total += F.cross_entropy(
+                        val_logits.reshape(-1, cfg.vocab_size),
+                        val_targets.to(device).reshape(-1),
+                    ).item()
+                model.train()
+            val_loss_avg = val_loss_total / n_val
+            logger.log_val(step, val_loss_avg)
+            val_steps_list.append(step)
+            val_losses_list.append(val_loss_avg)
+
         # ── Save / overwrite plots ─────────────────────────────────────────────
         if step % cfg.plot_every == 0:
-            plot_loss(steps_list, losses_list, plot_dir / "loss.png")
+            plot_loss(
+                steps_list, losses_list, plot_dir / "loss.png",
+                val_steps=val_steps_list or None,
+                val_losses=val_losses_list or None,
+            )
             plot_lr(steps_list, lrs_list, plot_dir / "lr.png")
             plot_grad_norm(
                 steps_list,

@@ -39,6 +39,10 @@ class TrainConfig:
     checkpoint_dir: str = "checkpoints"
     checkpoint_every: int = 1_000
 
+    # Validation
+    val_every: int = 250       # steps between val-loss evaluations; 0 disables
+    val_batches: int = 20      # number of val batches to average per evaluation
+
     # Observability
     grad_log_every: int = 100
     weight_log_every: int = 500
@@ -62,6 +66,10 @@ class TrainConfig:
             raise ValueError(f"weight_decay must be non-negative, got {self.weight_decay}")
         if self.warmup_steps < 0:
             raise ValueError(f"warmup_steps must be non-negative, got {self.warmup_steps}")
+        if self.val_batches <= 0:
+            raise ValueError(f"val_batches must be positive, got {self.val_batches}")
+        if self.val_every < 0:
+            raise ValueError(f"val_every must be non-negative, got {self.val_every}")
         if self.warmup_steps >= self.max_steps:
             raise ValueError(
                 f"warmup_steps ({self.warmup_steps}) must be less than "

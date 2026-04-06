@@ -78,6 +78,29 @@ def test_plot_loss_accepts_string_path(tmp_path: Path) -> None:
     assert Path(out).exists()
 
 
+def test_plot_loss_with_val_data(tmp_path: Path) -> None:
+    """plot_loss must produce a valid .png when val_steps and val_losses are provided."""
+    out = tmp_path / "loss.png"
+    val_steps = STEPS[::2]   # [0, 20, 40]
+    val_losses = [5.1, 3.9, 3.4]
+    plot_loss(STEPS, LOSSES, out, val_steps=val_steps, val_losses=val_losses)
+    _assert_valid_png(out)
+
+
+def test_plot_loss_without_val_data_no_crash(tmp_path: Path) -> None:
+    """plot_loss must not crash when val args are None (default)."""
+    out = tmp_path / "loss.png"
+    plot_loss(STEPS, LOSSES, out, val_steps=None, val_losses=None)
+    _assert_valid_png(out)
+
+
+def test_plot_loss_with_empty_val_lists(tmp_path: Path) -> None:
+    """plot_loss must not crash when val lists are empty (no evals yet)."""
+    out = tmp_path / "loss.png"
+    plot_loss(STEPS, LOSSES, out, val_steps=[], val_losses=[])
+    _assert_valid_png(out)
+
+
 # ── plot_lr ───────────────────────────────────────────────────────────────────
 
 

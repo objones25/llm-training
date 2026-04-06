@@ -314,3 +314,30 @@ def test_log_layers_no_output_between_cadence_steps(
     with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
         logger.log_layers(step=7, layer_norms=layer_norms, model=model)
     assert caplog.records == [], f"Unexpected log records at non-cadence step: {caplog.records}"
+
+
+# ── log_val (validation loss) ─────────────────────────────────────────────────
+
+
+def test_log_val_format(
+    logger: GradientLogger, cfg: TrainConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    """log_val must emit a single line: 'val step=N val_loss=X.XXXX'."""
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+        logger.log_val(step=250, val_loss=4.1234)
+    val_msgs = [msg for msg in caplog.messages if msg.startswith("val ")]
+    assert len(val_msgs) == 1, f"Expected exactly one val message, got: {val_msgs}"
+    kv = dict(pair.split("=") for pair in val_msgs[0].split() if "=" in pair)
+    assert kv["step"] == "250"
+    assert abs(float(kv["val_loss"]) - 4.1234) < 1e-3
+
+
+def test_log_val_is_info_level(
+    logger: GradientLogger, cfg: TrainConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    """log_val must log at INFO level so it appears on the console."""
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+        logger.log_val(step=0, val_loss=9.0)
+    records = [r for r in caplog.records if r.message.startswith("val ")]
+    assert records, "No val record found"
+    assert records[0].levelno == logging.INFO

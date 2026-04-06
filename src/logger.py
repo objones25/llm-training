@@ -91,6 +91,13 @@ class GradientLogger:
                     f"grad_norm={norm:.4f} exceeds threshold={threshold}"
                 )
 
+    def log_val(self, step: int, val_loss: float) -> None:
+        """Emit one validation-loss line (INFO — console + file).
+
+        Format: ``val step=N val_loss=X.XXXX``
+        """
+        _log.info(f"val step={step} val_loss={val_loss:.4f}")
+
     def log_layers(
         self,
         step: int,

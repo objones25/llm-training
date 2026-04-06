@@ -213,3 +213,79 @@ def test_plots_created(tmp_path: Path) -> None:
         p = plot_dir / fname
         assert p.exists(), f"Missing plot file: {fname}"
         assert p.stat().st_size > 0, f"Empty plot file: {fname}"
+
+
+# ── Validation loss ───────────────────────────────────────────────────────────
+
+
+def test_val_loss_logged_when_stream_provided(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """When val_token_stream is provided, 'val step=...' lines must appear in
+    console output at every val_every step."""
+    cfg = _cfg(tmp_path, max_steps=5, val_every=2, val_batches=2)
+    torch.manual_seed(0)
+    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
+    err = capsys.readouterr().err
+    val_lines = [ln for ln in err.splitlines() if ln.startswith("val ")]
+    # steps 0, 2, 4 each trigger val eval → 3 lines
+    assert len(val_lines) >= 2, f"Expected val loss lines, got: {val_lines}"
+    for line in val_lines:
+        assert "val_loss=" in line, f"Malformed val line: {line!r}"
+
+
+def test_val_loss_format(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """val line format must be 'val step=N val_loss=X.XXXX'."""
+    cfg = _cfg(tmp_path, max_steps=3, val_every=1, val_batches=1)
+    torch.manual_seed(0)
+    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
+    err = capsys.readouterr().err
+    val_lines = [ln for ln in err.splitlines() if ln.startswith("val ")]
+    assert val_lines, "No val lines found"
+    for line in val_lines:
+        kv = dict(pair.split("=") for pair in line.split() if "=" in pair)
+        assert "step" in kv, f"Missing step in: {line!r}"
+        assert "val_loss" in kv, f"Missing val_loss in: {line!r}"
+        float(kv["val_loss"])  # must be parseable as float
+
+
+def test_val_loss_disabled_when_no_stream(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """No val lines must appear when val_token_stream is not provided."""
+    cfg = _cfg(tmp_path, max_steps=5, val_every=1, val_batches=2)
+    torch.manual_seed(0)
+    train(cfg, token_stream=_token_stream())  # no val_token_stream
+    err = capsys.readouterr().err
+    val_lines = [ln for ln in err.splitlines() if ln.startswith("val ")]
+    assert val_lines == [], f"Unexpected val lines: {val_lines}"
+
+
+def test_val_loss_disabled_when_val_every_zero(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """No val lines must appear when val_every=0 even if a stream is provided."""
+    cfg = _cfg(tmp_path, max_steps=5, val_every=0)
+    torch.manual_seed(0)
+    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
+    err = capsys.readouterr().err
+    val_lines = [ln for ln in err.splitlines() if ln.startswith("val ")]
+    assert val_lines == [], f"Unexpected val lines with val_every=0: {val_lines}"
+
+
+def test_val_loss_is_finite(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Logged val_loss values must be finite and positive."""
+    cfg = _cfg(tmp_path, max_steps=4, val_every=2, val_batches=2)
+    torch.manual_seed(0)
+    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
+    err = capsys.readouterr().err
+    for line in err.splitlines():
+        if not line.startswith("val "):
+            continue
+        kv = dict(pair.split("=") for pair in line.split() if "=" in pair)
+        v = float(kv["val_loss"])
+        assert v > 0.0 and v < 1000.0, f"Suspicious val_loss={v} in: {line!r}"
