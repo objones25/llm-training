@@ -96,15 +96,27 @@ uv run python scripts/run_training.py --train-bin data/train.bin
 
 **Options:**
 
-| Flag               | Default          | Description                            |
-| ------------------ | ---------------- | -------------------------------------- |
-| `--train-bin`      | `data/train.bin` | Path to the uint16 training token file |
-| `--max-steps`      | `10000`          | Total training steps                   |
-| `--batch-size`     | `32`             | Sequences per batch                    |
-| `--learning-rate`  | `3e-4`           | Peak learning rate (after warmup)      |
-| `--checkpoint-dir` | `checkpoints`    | Directory for checkpoint `.pt` files   |
-| `--plot-dir`       | `plots`          | Directory for saved plot images        |
-| `--device`         | `cpu`            | Training device: `cpu`, `mps`, `cuda`  |
+| Flag                         | Default          | Description                                               |
+| ---------------------------- | ---------------- | --------------------------------------------------------- |
+| `--train-bin`                | `data/train.bin` | Path to the uint16 training token file                    |
+| `--val-bin`                  | `data/val.bin`   | Path to the uint16 validation token file (skipped if absent) |
+| `--max-steps`                | `10000`          | Total training steps                                      |
+| `--batch-size`               | `32`             | Sequences per batch                                       |
+| `--learning-rate`            | `3e-4`           | Peak learning rate (after warmup)                         |
+| `--checkpoint-dir`           | `checkpoints`    | Directory for checkpoint `.pt` files                      |
+| `--plot-dir`                 | `plots`          | Directory for saved plot images                           |
+| `--device`                   | `cpu`            | Training device: `cpu`, `mps`, `cuda`                     |
+| `--early-stopping-patience`  | `0`              | Val evals without improvement before stopping; 0 disables |
+
+**Example — Apple Silicon with validation and early stopping:**
+
+```bash
+uv run python scripts/run_training.py \
+    --train-bin data/train.bin \
+    --val-bin data/val.bin \
+    --device mps \
+    --early-stopping-patience 5
+```
 
 **Example — shorter run with faster learning rate:**
 
@@ -121,6 +133,8 @@ uv run python scripts/run_training.py \
 
 - A summary line is printed before training starts (token count, model size, estimated compute in EFLOPs).
 - Per-step log lines are written to stdout: `step=N loss=X.XXXX lr=X.Xe-XX grad_norm=X.XXXX ...`
+- When `--val-bin` is provided, validation loss is evaluated every `val_every` steps (default: 250) and logged as `val step=N val_loss=X.XXXX`.
+- When `--early-stopping-patience` is set, training stops automatically if val loss has not improved for that many consecutive evaluations.
 - Checkpoints are saved as `checkpoint_NNNNNNN.pt` (7-digit zero-padded step number) every `checkpoint_every` steps (default: 1,000).
 - Six plot files are updated every `plot_every` steps (default: 500): `loss.png`, `lr.png`, `grad_norm.png`, `grad_heatmap.png`, `weight_norm.png`, `grad_hist.png`.
 
@@ -150,6 +164,63 @@ uv run python scripts/run_training.py --train-bin data/train.bin --device mps
 # NVIDIA GPU (cloud)
 uv run python scripts/run_training.py --train-bin data/train.bin --device cuda
 ```
+
+---
+
+### 4. Evaluate the trained model
+
+Loads the latest checkpoint (or a specific one), computes perplexity on the validation set, and optionally generates a short text sample as a qualitative sanity check.
+
+Requires a checkpoint from step 3 and `val.bin` from step 2.
+
+```bash
+uv run python scripts/evaluate.py
+```
+
+**Options:**
+
+| Flag                  | Default          | Description                                                    |
+| --------------------- | ---------------- | -------------------------------------------------------------- |
+| `--checkpoint`        | _(auto-detect)_  | Path to a specific `.pt` file; overrides `--checkpoint-dir`    |
+| `--checkpoint-dir`    | `checkpoints`    | Directory to search for the latest checkpoint                  |
+| `--val-bin`           | `data/val.bin`   | Path to the uint16 validation token file                       |
+| `--device`            | _(from cfg)_     | Evaluation device: `cpu`, `mps`, `cuda`                        |
+| `--val-batches`       | _(all)_          | Max number of val batches to evaluate                          |
+| `--no-sample`         | off              | Skip text generation (useful in CI / headless environments)    |
+| `--tokenizer`         | _(auto-detect)_  | Path to tokenizer JSON; auto-discovered from cwd if omitted    |
+| `--top-k`             | `50`             | Top-k value for sampling; set to `1` for greedy               |
+| `--max-new-tokens`    | `100`            | Number of tokens to generate in the sample                     |
+
+**Example — evaluate the latest checkpoint on MPS, no sample output:**
+
+```bash
+uv run python scripts/evaluate.py --device mps --no-sample
+```
+
+**Example — evaluate a specific checkpoint with a custom val file:**
+
+```bash
+uv run python scripts/evaluate.py \
+    --checkpoint checkpoints/checkpoint_0005000.pt \
+    --val-bin data/val.bin
+```
+
+**Output:**
+
+```text
+checkpoint : checkpoints/checkpoint_0005000.pt
+step       : 5,000
+config     : 6-layer  d_model=512  n_heads=8  vocab=8192
+val data   : 40 batches  (655,360 tokens)
+
+val loss   : 3.2841
+perplexity : 26.72
+
+── sample (decoded) ──────────────────────────────────
+The study found that students who...
+```
+
+If no tokenizer is found, the sample is printed as raw token IDs instead.
 
 ---
 
