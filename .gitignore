@@ -7,6 +7,7 @@ tokenizer.json
 data/
 checkpoints/
 plots/
+train.log
 
 # Python
 __pycache__/
