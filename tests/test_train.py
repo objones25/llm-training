@@ -61,6 +61,18 @@ def _token_stream() -> list[int]:
     return list(range(256)) * 40
 
 
+def _random_val_stream(vocab_size: int = 256, n: int = 10_240, seed: int = 7) -> list[int]:
+    """Random token stream for validation — uncorrelated with the cycling train stream.
+
+    The model trains on a cycling pattern (0,1,...,255,0,...) and learns to
+    predict n+1 mod 256.  This random stream breaks that pattern so val loss
+    stays high and stagnates quickly, reliably triggering early stopping
+    regardless of embedding-scale or other model changes.
+    """
+    rng = torch.Generator().manual_seed(seed)
+    return torch.randint(0, vocab_size, (n,), generator=rng).tolist()
+
+
 def _fixed_batch_stream(cfg: TrainConfig) -> itertools.cycle:
     """Cycle exactly one batch worth of tokens so every step is identical."""
     tokens_per_batch = cfg.batch_size * (cfg.seq_len + 1)  # 2 * 17 = 34
@@ -307,7 +319,7 @@ def test_early_stopping_halts_training(tmp_path: Path) -> None:
         early_stopping_patience=1,
     )
     torch.manual_seed(0)
-    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
+    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_random_val_stream()))
     # If early stopping worked, we completed far fewer than 1000 steps.
     # (Token stream has 10 240 tokens → ~300 batches, so exhaustion ≠ 1000 steps.)
     # The key assertion: training did not run max_steps iterations.
@@ -327,7 +339,7 @@ def test_early_stopping_logs_message(
         early_stopping_patience=1,
     )
     torch.manual_seed(0)
-    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
+    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_random_val_stream()))
     err = capsys.readouterr().err
     assert any("early_stopping" in line for line in err.splitlines()), (
         "Expected 'early_stopping' in stderr when early stopping triggers"

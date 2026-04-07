@@ -218,6 +218,42 @@ def test_init_loss_near_uniform(cfg: TrainConfig) -> None:
     )
 
 
+def test_embedding_scale_applied(cfg: TrainConfig) -> None:
+    """GPT-3 style embedding scaling: output at position 0 must differ from
+    the raw embedding sum by exactly sqrt(d_model) (rule 21)."""
+    import math
+
+    torch.manual_seed(8)
+    m = GPT(cfg)
+    m.eval()
+
+    idx = torch.zeros(1, 1, dtype=torch.long)  # token 0, position 0
+    with torch.no_grad():
+        # Raw embedding sum (unscaled)
+        raw = m.token_embedding(idx) + m.position_embedding(torch.tensor([0]))
+        # Run forward to get the residual stream just after embedding
+        # We can verify the scale factor is stored and correct.
+        expected_scale = math.sqrt(cfg.d_model)
+        assert abs(m._embed_scale - expected_scale) < 1e-6, (
+            f"_embed_scale {m._embed_scale} != sqrt(d_model) {expected_scale}"
+        )
+        # Verify scaled output matches raw * sqrt(d_model) for a simple hook:
+        # hook the first block input to capture the post-embedding tensor.
+        captured: list[torch.Tensor] = []
+
+        def hook(module: torch.nn.Module, inp: tuple, out: torch.Tensor) -> None:
+            captured.append(inp[0].detach().clone())
+
+        handle = m.blocks[0].register_forward_hook(hook)
+        _ = m(idx)
+        handle.remove()
+
+    post_embed = captured[0]  # shape (1, 1, d_model)
+    assert torch.allclose(post_embed, raw * expected_scale, atol=1e-5), (
+        "Embedding output is not scaled by sqrt(d_model)"
+    )
+
+
 def test_n_heads_assertion(cfg: TrainConfig) -> None:
     """ValueError must be raised when d_model is not divisible by n_heads.
 

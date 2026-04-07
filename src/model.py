@@ -24,6 +24,8 @@ Internal classes (not exported):
 """
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -234,6 +236,12 @@ class GPT(nn.Module):
             if name.endswith(("attn.out_proj.weight", "ff.fc2.weight")):
                 nn.init.normal_(p, mean=0.0, std=residual_std)
 
+        # GPT-3 style embedding output scale: multiplying the embedding sum by
+        # sqrt(d_model) rebalances the residual stream so that the embedding
+        # contribution doesn't dominate over the transformer block outputs.
+        # Stored as a float so forward() doesn't recompute it every step.
+        self._embed_scale: float = math.sqrt(cfg.d_model)
+
         # Store non-embedding parameter count as an attribute.
         # The "embedding" filter correctly excludes token_embedding.weight
         # (yielded under that name) and position_embedding.weight.
@@ -286,7 +294,7 @@ class GPT(nn.Module):
         pos_offset = kv_cache.seq_len if kv_cache is not None else 0
         positions = torch.arange(pos_offset, pos_offset + T, device=idx.device)
 
-        x = self.token_embedding(idx) + self.position_embedding(positions)
+        x = (self.token_embedding(idx) + self.position_embedding(positions)) * self._embed_scale
         for i, block in enumerate(self.blocks):
             layer_cache = kv_cache.layers[i] if kv_cache is not None else None
             x = block(x, layer_cache=layer_cache)
