@@ -162,6 +162,15 @@ def sample_text(
 ) -> list[int]:
     """Autoregressively sample *max_new_tokens* tokens from the model.
 
+    Uses a KV cache for O(T) per-step cost instead of O(T²).
+
+    Two-phase generation
+    --------------------
+    1. **Prefill** — run the full seed through the model in one pass.  The KV
+       cache is populated with K/V tensors for every seed position.
+    2. **Generate** — feed one token at a time.  Each step only projects the
+       new token's Q/K/V and appends to the cache; attention is O(T_cached).
+
     Parameters
     ----------
     model : GPT
@@ -179,14 +188,35 @@ def sample_text(
     list[int]
         The generated token IDs (seed + newly generated).
     """
+    from src.kv_cache import KVCache
+
     model.eval()
     generated = list(seed_tokens)
+
     with torch.no_grad():
+        # ── Prefill ───────────────────────────────────────────────────────────
+        # Clip seed to seq_len in case caller passes a long prompt.
+        seed = generated[-cfg.seq_len:]
+        seed_tensor = torch.tensor([seed], dtype=torch.long, device=device)
+
+        param_dtype = next(model.parameters()).dtype
+        kv_cache = KVCache.empty(
+            n_layers=cfg.n_layers,
+            batch_size=1,
+            n_heads=cfg.n_heads,
+            head_dim=cfg.d_model // cfg.n_heads,
+            device=device,
+            dtype=param_dtype,
+        )
+        logits = model(seed_tensor, kv_cache=kv_cache)
+        next_logits = logits[0, -1, :]  # logits at the last seed position
+
+        # ── Generate ──────────────────────────────────────────────────────────
         for _ in range(max_new_tokens):
-            context = generated[-cfg.seq_len:]
-            idx = torch.tensor([context], dtype=torch.long, device=device)
-            logits = model(idx)
-            next_logits = logits[0, -1, :]  # (vocab_size,)
+            # Stop if we would exceed the position embedding table.
+            if kv_cache.seq_len >= cfg.seq_len:
+                break
+
             if top_k < cfg.vocab_size:
                 top_vals, _ = torch.topk(next_logits, top_k)
                 threshold = top_vals[-1]
@@ -196,6 +226,12 @@ def sample_text(
             probs = torch.softmax(next_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1).item()
             generated.append(int(next_token))
+
+            # Single-token forward — O(T_cached) cost.
+            idx = torch.tensor([[next_token]], dtype=torch.long, device=device)
+            logits = model(idx, kv_cache=kv_cache)
+            next_logits = logits[0, -1, :]
+
     return generated
 
 

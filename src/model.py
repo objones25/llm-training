@@ -10,7 +10,12 @@ Architecture
 Public API
 ----------
     GPT(cfg: TrainConfig) → nn.Module
-        forward(idx: LongTensor[B, T]) → FloatTensor[B, T, vocab_size]
+        forward(idx: LongTensor[B, T], kv_cache=None) → FloatTensor[B, T, vocab_size]
+
+    KV-cache inference (two-phase)
+        cache = KVCache.empty(...)
+        logits = model(seed_tokens, kv_cache=cache)   # prefill
+        logits = model(next_token,  kv_cache=cache)   # generate (repeated)
 
 Internal classes (not exported):
     CausalSelfAttention
@@ -24,6 +29,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.config import TrainConfig
+from src.kv_cache import KVCache, LayerKVCache
 
 
 # ── Attention ─────────────────────────────────────────────────────────────────
@@ -56,11 +62,19 @@ class CausalSelfAttention(nn.Module):
         # No mask buffer needed: F.scaled_dot_product_attention handles the
         # causal mask internally when is_causal=True.
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        layer_cache: LayerKVCache | None = None,
+    ) -> torch.Tensor:
         """
         Parameters
         ----------
         x : FloatTensor[B, T, d_model]
+        layer_cache : LayerKVCache or None
+            When provided, K/V for new tokens are appended to the cache and
+            attention is computed over the full cached history.  Pass None
+            during training (standard causal attention, no cache).
 
         Returns
         -------
@@ -77,9 +91,22 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
 
-        # Scaled dot-product attention with causal mask.
+        if layer_cache is not None:
+            # Extend the cache with the new K/V tensors.
+            k = torch.cat([layer_cache.k, k], dim=2)  # (B, n_heads, T_cached+T, head_dim)
+            v = torch.cat([layer_cache.v, v], dim=2)
+            layer_cache.k = k
+            layer_cache.v = v
+            # Prefill (T > 1): causal mask needed within the new sequence.
+            # Generation (T == 1): query is already at the last position —
+            # it can attend to the entire cache without a mask.
+            is_causal = T > 1
+        else:
+            is_causal = True
+
+        # Scaled dot-product attention.
         # PyTorch 2.0+ dispatches to FlashAttention-2 on CUDA automatically.
-        out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
         # (B, n_heads, T, head_dim)
         out = out.transpose(1, 2).contiguous().view(B, T, C)  # (B, T, d_model)
         return self.out_proj(out)
@@ -133,17 +160,23 @@ class TransformerBlock(nn.Module):
         self.ln_2 = nn.LayerNorm(cfg.d_model)
         self.ff = FeedForward(cfg)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        layer_cache: LayerKVCache | None = None,
+    ) -> torch.Tensor:
         """
         Parameters
         ----------
         x : FloatTensor[B, T, d_model]
+        layer_cache : LayerKVCache or None
+            Passed through to ``CausalSelfAttention.forward``.
 
         Returns
         -------
         FloatTensor[B, T, d_model]
         """
-        x = x + self.attn(self.ln_1(x))
+        x = x + self.attn(self.ln_1(x), layer_cache=layer_cache)
         x = x + self.ff(self.ln_2(x))
         return x
 
@@ -228,22 +261,34 @@ class GPT(nn.Module):
             if module.bias is not None:
                 nn.init.zeros_(module.bias)
 
-    def forward(self, idx: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        idx: torch.Tensor,
+        kv_cache: KVCache | None = None,
+    ) -> torch.Tensor:
         """
         Parameters
         ----------
         idx : LongTensor[B, T]
-            Token IDs. T must be ≤ cfg.seq_len.
+            Token IDs.  T must be ≤ cfg.seq_len.  During cached generation
+            this is typically a single token (T == 1).
+        kv_cache : KVCache or None
+            When provided, positions are offset by the current cache length so
+            new tokens receive the correct positional embeddings.  The cache is
+            updated in place at each attention layer.  Pass None during
+            training (no overhead, identical behavior).
 
         Returns
         -------
         logits : FloatTensor[B, T, vocab_size]
         """
         B, T = idx.shape
-        positions = torch.arange(T, device=idx.device)
+        pos_offset = kv_cache.seq_len if kv_cache is not None else 0
+        positions = torch.arange(pos_offset, pos_offset + T, device=idx.device)
 
         x = self.token_embedding(idx) + self.position_embedding(positions)
-        for block in self.blocks:
-            x = block(x)
+        for i, block in enumerate(self.blocks):
+            layer_cache = kv_cache.layers[i] if kv_cache is not None else None
+            x = block(x, layer_cache=layer_cache)
         x = self.ln_f(x)
         return self.lm_head(x)
