@@ -92,6 +92,12 @@ def main() -> None:
         default=None,
         help="Override TrainConfig.early_stopping_patience (0 = disabled)",
     )
+    parser.add_argument(
+        "--use-muon",
+        action="store_true",
+        default=False,
+        help="Use Muon optimizer for weight matrix params; AdamW for ln+embed",
+    )
     args = parser.parse_args()
 
     import numpy as np
@@ -116,6 +122,8 @@ def main() -> None:
         overrides["device"] = args.device
     if args.early_stopping_patience is not None:
         overrides["early_stopping_patience"] = args.early_stopping_patience
+    if args.use_muon:
+        overrides["use_muon"] = True
     cfg = TrainConfig(**overrides)
 
     # ── Pre-training summary ───────────────────────────────────────────────────

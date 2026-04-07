@@ -1,6 +1,6 @@
-"""AdamW optimizer with three explicit parameter groups.
+"""Optimizer construction with three explicit parameter groups.
 
-Separates model parameters into three groups before constructing the optimizer:
+Separates model parameters into three groups:
 
     ln group      — LayerNorm parameters (identified by module type).
                     LR = base_lr × cfg.ln_lr_mult.  Weight decay = 0.
@@ -17,6 +17,13 @@ Separates model parameters into three groups before constructing the optimizer:
     matrix group  — All remaining weight matrices (QKV, out_proj, FF, lm_head).
                     LR = base_lr.  Weight decay = cfg.weight_decay.
 
+When ``cfg.use_muon`` is True, the matrix group uses the Muon optimizer
+(Newton-Schulz orthogonalization on gradient updates) and the ln+embed groups
+use AdamW.  The function then returns a ``(Muon, AdamW)`` tuple.
+
+When ``cfg.use_muon`` is False (default), a single AdamW optimizer is returned
+with all three param groups.
+
 LayerNorm parameters are identified by inspecting module types (not by name
 substring matching) because the GPT model names its LayerNorm modules as
 ``ln_1``, ``ln_2``, and ``ln_f`` — none of which contain "norm".
@@ -26,7 +33,7 @@ Public API
     make_optimizer(
         model: nn.Module,
         cfg: TrainConfig,
-    ) -> torch.optim.AdamW
+    ) -> torch.optim.AdamW | tuple[Muon, torch.optim.AdamW]
 """
 from __future__ import annotations
 
@@ -34,29 +41,32 @@ import torch.nn as nn
 import torch.optim
 
 from src.config import TrainConfig
+from src.muon import Muon
 
 
 def make_optimizer(
     model: nn.Module,
     cfg: TrainConfig,
-) -> torch.optim.AdamW:
-    """Return an AdamW optimizer with three parameter groups.
+) -> torch.optim.AdamW | tuple[Muon, torch.optim.AdamW]:
+    """Return an optimizer (or optimizer pair) for the model.
 
     Parameters
     ----------
     model : nn.Module
         The model whose parameters will be optimized.
     cfg : TrainConfig
-        Supplies ``learning_rate``, ``weight_decay``, ``ln_lr_mult``, and
-        ``embed_lr_mult``.
+        Supplies ``learning_rate``, ``weight_decay``, ``ln_lr_mult``,
+        ``embed_lr_mult``, and ``use_muon``.
 
     Returns
     -------
     torch.optim.AdamW
-        Three param groups:
-        - ln:     lr = learning_rate × ln_lr_mult,    weight_decay = 0
-        - embed:  lr = learning_rate × embed_lr_mult, weight_decay = 0
-        - matrix: lr = learning_rate,                 weight_decay = cfg.weight_decay
+        When ``cfg.use_muon`` is False: a single AdamW with three param groups
+        (ln, embed, matrix).
+
+    tuple[Muon, torch.optim.AdamW]
+        When ``cfg.use_muon`` is True: ``(muon_opt, adamw_opt)`` where
+        ``muon_opt`` holds the matrix group and ``adamw_opt`` holds ln+embed.
     """
     # Collect LayerNorm parameter IDs via type inspection.
     # Name-based substring matching ("norm") would miss the GPT model's
@@ -88,6 +98,20 @@ def make_optimizer(
             matrix_params.append(param)
 
     base_lr = cfg.learning_rate
+
+    if cfg.use_muon:
+        muon_opt = Muon(matrix_params, lr=base_lr)
+        adamw_opt = torch.optim.AdamW(
+            [
+                {"params": ln_params,    "lr": base_lr * cfg.ln_lr_mult,    "weight_decay": 0.0},
+                {"params": embed_params, "lr": base_lr * cfg.embed_lr_mult, "weight_decay": 0.0},
+            ],
+            lr=base_lr,
+            betas=cfg.adamw_betas,
+            eps=cfg.adamw_eps,
+        )
+        return (muon_opt, adamw_opt)
+
     param_groups = [
         {"params": ln_params,     "lr": base_lr * cfg.ln_lr_mult,    "weight_decay": 0.0},
         {"params": embed_params,  "lr": base_lr * cfg.embed_lr_mult, "weight_decay": 0.0},

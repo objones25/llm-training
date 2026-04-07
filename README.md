@@ -107,6 +107,7 @@ uv run python scripts/run_training.py --train-bin data/train.bin
 | `--plot-dir`                | `plots`          | Directory for saved plot images                              |
 | `--device`                  | `cpu`            | Training device: `cpu`, `mps`, `cuda`                        |
 | `--early-stopping-patience` | `0`              | Val evals without improvement before stopping; 0 disables    |
+| `--use-muon`                | off              | Use Muon optimizer for weight matrix params (see below)      |
 
 **Example — Apple Silicon with validation and early stopping:**
 
@@ -118,13 +119,15 @@ uv run python scripts/run_training.py \
     --early-stopping-patience 5
 ```
 
-**Example — shorter run with faster learning rate:**
+**Example — Muon optimizer, shorter run:**
 
 ```bash
 uv run python scripts/run_training.py \
     --train-bin data/train.bin \
+    --val-bin data/val.bin \
     --max-steps 5000 \
     --learning-rate 1e-3 \
+    --use-muon \
     --checkpoint-dir runs/exp1/ckpts \
     --plot-dir runs/exp1/plots
 ```
@@ -137,7 +140,7 @@ uv run python scripts/run_training.py \
 - When `--early-stopping-patience` is set to a positive value, training stops automatically if val loss has not improved for that many consecutive evaluations.
 - When any per-layer gradient norm exceeds the threshold, a WARNING line is emitted: `WARNING step=N layer=<name> grad_norm=X.XXXX exceeds threshold=X.X`
 - When the total gradient norm exceeds `grad_norm_spike_threshold`, all per-layer norms are written to the log file immediately (DEBUG level, prefix `spike`).
-- Checkpoints are saved as `checkpoint_NNNNNNN.pt` (7-digit zero-padded step number) every `checkpoint_every` steps (default: 1,000).
+- A single `best.pt` checkpoint is saved (overwriting) each time validation loss improves.
 - Six plot files are updated every `plot_every` steps (default: 500): `loss.png`, `lr.png`, `grad_norm.png`, `grad_heatmap.png`, `weight_norm.png`, `grad_hist.png`.
 
 **Architecture and other hyperparameters** (`n_layers`, `d_model`, `n_heads`, `d_ff`, `warmup_steps`, `weight_decay`, etc.) require editing `src/config.py` directly — they are not exposed as CLI flags.
@@ -148,11 +151,18 @@ uv run python scripts/run_training.py \
 | --------------------------- | ------------ | ---------------------------------------------- |
 | `adamw_betas`               | (0.9, 0.999) | AdamW momentum and variance decay rates        |
 | `adamw_eps`                 | 1e-8         | AdamW numerical stability constant             |
+| `use_muon`                  | False        | Muon optimizer for matrix params (see below)   |
 | `use_compile`               | False        | Enable `torch.compile()` (adds 30-60s startup) |
 | `use_amp`                   | False        | Automatic mixed precision (CUDA only)          |
 | `val_every`                 | 250          | Steps between validation-loss evaluations      |
 | `val_batches`               | 20           | Number of validation batches per evaluation    |
 | `grad_norm_spike_threshold` | 2.5          | Total norm threshold for immediate layer dump  |
+
+**Muon optimizer (`--use-muon`):**
+
+Muon replaces AdamW for weight matrix parameters (QKV, projections, feed-forward, lm_head). It applies Newton-Schulz orthogonalization to each gradient update, normalizing the effective step size across all weight matrices regardless of raw gradient magnitude. LayerNorm and embedding parameters continue to use AdamW.
+
+When `--use-muon` is enabled, the training loop creates two optimizers and two schedulers internally — this is handled automatically, no extra flags needed.
 
 **Device selection:**
 
@@ -202,18 +212,18 @@ uv run python scripts/evaluate.py
 uv run python scripts/evaluate.py --device mps --no-sample
 ```
 
-**Example — evaluate a specific checkpoint with a custom val file:**
+**Example — evaluate the best checkpoint with a custom val file:**
 
 ```bash
 uv run python scripts/evaluate.py \
-    --checkpoint checkpoints/checkpoint_0005000.pt \
+    --checkpoint checkpoints/best.pt \
     --val-bin data/val.bin
 ```
 
 **Output:**
 
 ```text
-checkpoint : checkpoints/checkpoint_0005000.pt
+checkpoint : checkpoints/best.pt
 step       : 5,000
 config     : 6-layer  d_model=512  n_heads=8  vocab=8192
 val data   : 40 batches  (655,360 tokens)
@@ -248,24 +258,143 @@ All tests run on CPU with synthetic data — no GPU or network access required.
 
 ## Checkpoints and Resuming
 
-Checkpoints are saved automatically every `checkpoint_every` steps (default: 1,000) as `checkpoint_NNNNNNN.pt` files in `checkpoint_dir`. Each checkpoint contains:
+A single `best.pt` file is saved in `checkpoint_dir` whenever validation loss improves. Each time the val loss drops to a new minimum, `best.pt` is overwritten — only the best weights are kept on disk. Each checkpoint contains:
 
 - Model weights
-- Optimizer state (momentum and variance buffers for AdamW)
+- Optimizer state (momentum/variance buffers for AdamW; momentum buffers for Muon)
 - Scheduler state (current LR schedule position)
 - Training step counter
 - Configuration (`TrainConfig`)
+
+`best.pt` is only written when `--val-bin` is provided and val loss improves. If no val stream is given, no checkpoint is saved.
 
 To resume training from a checkpoint, load it and pass the same config plus restored optimizer and scheduler:
 
 ```python
 from src.checkpoint import load_checkpoint
 
-step = load_checkpoint("checkpoints/checkpoint_0005000.pt", model, optimizer, scheduler=scheduler)
+step = load_checkpoint("checkpoints/best.pt", model, optimizer, scheduler=scheduler)
 cfg.max_steps += 5000  # Extend training by another 5k steps
 train(cfg, model=model, token_stream=resumed_stream)
 ```
 
-**Important:** Always pass `scheduler=scheduler` to both `save_checkpoint()` and `load_checkpoint()`. Without it, the LR schedule state is lost and training diverges on resume — the scheduler resets to initial state instead of resuming from where it left off.
+**Important:** Always pass `scheduler=scheduler` to both `save_checkpoint()` and `load_checkpoint()`. Without it, the LR schedule state is lost and training diverges on resume.
 
-Checkpoints created without scheduler state (pre-v2 format) will emit a warning on load and the scheduler will start fresh. New checkpoints always include scheduler state.
+When using Muon (`use_muon=True`), the optimizer is a `(Muon, AdamW)` tuple and the scheduler is a `(LambdaLR, LambdaLR)` tuple. Pass both tuples to `load_checkpoint`:
+
+```python
+from src.optimizer import make_optimizer
+from src.scheduler import make_scheduler
+
+optimizer = make_optimizer(model, cfg)         # returns (Muon, AdamW) tuple
+muon_sched = make_scheduler(optimizer[0], cfg)
+adamw_sched = make_scheduler(optimizer[1], cfg)
+step = load_checkpoint("checkpoints/best.pt", model, optimizer,
+                       scheduler=(muon_sched, adamw_sched))
+```
+
+---
+
+## Running in the Cloud
+
+For the 604M-parameter compute-optimal run, a single H100 80 GB GPU on RunPod or Lambda Labs takes roughly 12 hours. The steps below assume a fresh Ubuntu instance with NVIDIA drivers already installed.
+
+### 1. Provision and connect
+
+```bash
+# RunPod: create a pod with PyTorch template (CUDA 12.x + Python 3.11+)
+# Lambda Labs: launch an instance with the PyTorch AMI
+ssh user@<instance-ip>
+```
+
+### 2. Install uv and clone the repo
+
+```bash
+curl -Lsf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env   # or restart shell
+
+git clone https://github.com/objones25/llm-training
+cd llm-training
+uv sync
+```
+
+### 3. Upload pre-tokenized data (option A — copy from local)
+
+If you already ran `pretokenize.py` locally:
+
+```bash
+# From your local machine:
+rsync -avz --progress data/train.bin data/val.bin user@<instance-ip>:~/llm-training/data/
+```
+
+### 3. Pre-tokenize on the instance (option B — run remotely)
+
+If the instance has enough storage (≥25 GB), tokenize directly on the GPU box:
+
+```bash
+uv run python scripts/train_tokenizer.py --vocab-size 8192 --max-docs 200000
+uv run python scripts/pretokenize.py --tokenizer tokenizer.json --output-dir data
+```
+
+### 4. Run training
+
+```bash
+uv run python scripts/run_training.py \
+    --train-bin data/train.bin \
+    --val-bin data/val.bin \
+    --device cuda \
+    --use-muon \
+    --early-stopping-patience 10
+```
+
+For the full 604M run, set architecture overrides in `src/config.py` before launching:
+
+```python
+n_layers = 12
+d_model  = 2048
+n_heads  = 32
+d_ff     = 8192
+max_steps = 20_000
+use_amp   = True   # BF16 mixed precision — roughly 2× throughput on H100
+```
+
+**Recommended cloud flags:**
+
+| Flag / config                  | Value     | Reason                                          |
+| ------------------------------ | --------- | ----------------------------------------------- |
+| `--device cuda`                | required  | Use the GPU                                     |
+| `--use-muon`                   | enabled   | Eliminates bimodal gradient distribution        |
+| `use_amp = True`               | in config | 2× throughput via BF16 on Ampere/Hopper GPUs    |
+| `use_compile = True`           | in config | ~10–15% speedup after 60s warm-up on H100       |
+| `--early-stopping-patience 10` | 10        | Stop automatically if val loss plateaus         |
+
+### 5. Monitor progress
+
+Logs stream to stdout and to `train.log`. To follow in real time:
+
+```bash
+tail -f train.log
+```
+
+Plot images are written to `plots/` every 500 steps. Copy them locally to inspect:
+
+```bash
+# From your local machine:
+rsync -avz user@<instance-ip>:~/llm-training/plots/ ./remote-plots/
+```
+
+### 6. Download the best checkpoint
+
+```bash
+# From your local machine:
+scp user@<instance-ip>:~/llm-training/checkpoints/best.pt ./checkpoints/
+```
+
+Then evaluate locally:
+
+```bash
+uv run python scripts/evaluate.py \
+    --checkpoint checkpoints/best.pt \
+    --val-bin data/val.bin \
+    --device cpu
+```

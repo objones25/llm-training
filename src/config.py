@@ -26,6 +26,7 @@ class TrainConfig:
     adamw_eps: float = 1e-8
     ln_lr_mult: float = 3.0      # LR multiplier for LayerNorm params (no weight decay)
     embed_lr_mult: float = 0.1   # LR multiplier for embedding params (no weight decay)
+    use_muon: bool = False       # Use Muon optimizer for matrix params; AdamW for ln+embed
 
     # Data
     dataset_name: str = "HuggingFaceFW/fineweb-edu"

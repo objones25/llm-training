@@ -268,3 +268,127 @@ def test_loss_identity_after_load(
         f"Loss after load ({loss_loaded.item():.6f}) differs from "
         f"reference ({loss_ref_val:.6f})"
     )
+
+
+# ── save_as_best tests ────────────────────────────────────────────────────────
+
+
+def test_save_as_best_creates_best_pt(
+    model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig
+) -> None:
+    """save_as_best=True must create best.pt in checkpoint_dir."""
+    path = save_checkpoint(model, optimizer, step=500, cfg=cfg, save_as_best=True)
+    assert path.exists()
+    assert path.name == "best.pt"
+
+
+def test_save_as_best_filename(
+    model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig
+) -> None:
+    """Path returned when save_as_best=True must end in best.pt."""
+    path = save_checkpoint(model, optimizer, step=1000, cfg=cfg, save_as_best=True)
+    assert path.name == "best.pt"
+
+
+def test_save_as_best_overwrites(
+    model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig
+) -> None:
+    """Two saves with save_as_best=True must produce exactly one file."""
+    p1 = save_checkpoint(model, optimizer, step=100, cfg=cfg, save_as_best=True)
+    p2 = save_checkpoint(model, optimizer, step=200, cfg=cfg, save_as_best=True)
+    assert p1 == p2  # same path
+    ckpt_dir = Path(cfg.checkpoint_dir)
+    best_files = list(ckpt_dir.glob("best.pt"))
+    assert len(best_files) == 1, "More than one best.pt file found"
+
+
+# ── Tuple optimizer (Muon + AdamW) checkpoint tests ───────────────────────────
+
+
+@pytest.fixture
+def muon_cfg(tmp_path: pytest.TempPathFactory) -> TrainConfig:
+    return TrainConfig(
+        vocab_size=256,
+        n_layers=2,
+        d_model=64,
+        n_heads=2,
+        d_ff=128,
+        seq_len=16,
+        batch_size=2,
+        use_muon=True,
+        checkpoint_dir=str(tmp_path / "muon_checkpoints"),
+    )
+
+
+@pytest.fixture
+def muon_model(muon_cfg: TrainConfig) -> GPT:
+    torch.manual_seed(0)
+    return GPT(muon_cfg)
+
+
+@pytest.fixture
+def tuple_optimizer(muon_model: GPT, muon_cfg: TrainConfig):
+    from src.optimizer import make_optimizer
+    return make_optimizer(muon_model, muon_cfg)
+
+
+def test_save_load_tuple_optimizer(
+    muon_model: GPT, tuple_optimizer, muon_cfg: TrainConfig
+) -> None:
+    """save/load round-trip with a (Muon, AdamW) tuple optimizer must work."""
+    # Run one step to populate optimizer state.
+    torch.manual_seed(42)
+    muon_opt, adamw_opt = tuple_optimizer
+    idx = torch.randint(0, muon_cfg.vocab_size, (muon_cfg.batch_size, muon_cfg.seq_len))
+    targets = torch.randint(0, muon_cfg.vocab_size, (muon_cfg.batch_size, muon_cfg.seq_len))
+    import torch.nn.functional as F
+    logits = muon_model(idx)
+    loss = F.cross_entropy(logits.view(-1, muon_cfg.vocab_size), targets.view(-1))
+    loss.backward()
+    muon_opt.step()
+    adamw_opt.step()
+    muon_opt.zero_grad()
+    adamw_opt.zero_grad()
+
+    path = save_checkpoint(muon_model, tuple_optimizer, step=1, cfg=muon_cfg)
+    assert path.exists()
+
+    restored_step = load_checkpoint(path, muon_model, tuple_optimizer)
+    assert restored_step == 1
+
+
+def test_logit_identity_tuple_optimizer(
+    muon_model: GPT, tuple_optimizer, muon_cfg: TrainConfig
+) -> None:
+    """Logits must be bit-identical after save/load with tuple optimizer."""
+    torch.manual_seed(42)
+    idx = torch.randint(0, muon_cfg.vocab_size, (muon_cfg.batch_size, muon_cfg.seq_len))
+
+    muon_model.eval()
+    with torch.no_grad():
+        logits_before = muon_model(idx).clone()
+
+    path = save_checkpoint(muon_model, tuple_optimizer, step=1, cfg=muon_cfg)
+
+    for param in muon_model.parameters():
+        param.data.fill_(0.0)
+
+    load_checkpoint(path, muon_model, tuple_optimizer)
+
+    muon_model.eval()
+    with torch.no_grad():
+        logits_after = muon_model(idx)
+
+    assert torch.equal(logits_before, logits_after), (
+        "Logits after load (tuple optimizer) do not match logits before save"
+    )
+
+
+def test_optimizer_type_mismatch_raises(
+    model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig,
+    muon_model: GPT, tuple_optimizer, muon_cfg: TrainConfig,
+) -> None:
+    """Loading a single-optimizer checkpoint with a tuple optimizer must raise ValueError."""
+    path = save_checkpoint(model, optimizer, step=1, cfg=cfg)
+    with pytest.raises(ValueError, match="mismatch"):
+        load_checkpoint(path, muon_model, tuple_optimizer)

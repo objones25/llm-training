@@ -10,12 +10,27 @@ NaN guard (CONTRIBUTING.md, rule 23)
 If ``loss`` is not finite at any step, a ``RuntimeError`` is raised
 immediately.  Training is not silently continued or soft-stopped.
 
+Optimizer modes
+---------------
+When ``cfg.use_muon`` is False (default), a single AdamW optimizer handles
+all parameter groups.
+
+When ``cfg.use_muon`` is True, ``make_optimizer`` returns a ``(Muon, AdamW)``
+tuple.  The training loop creates two independent LambdaLR schedulers (one per
+optimizer) using the same cosine-warmup lambda so LR trajectories stay in sync.
+
+Checkpointing
+-------------
+A single ``best.pt`` file is saved (overwriting) whenever the validation loss
+improves.  Numbered checkpoints are not written.
+
 Public API
 ----------
     train(
-        cfg:          TrainConfig,
-        model:        GPT | None = None,
-        token_stream: Iterable[int] | None = None,
+        cfg:             TrainConfig,
+        model:           GPT | None = None,
+        token_stream:    Iterable[int] | None = None,
+        val_token_stream: Iterable[int] | None = None,
     ) -> GPT
 """
 from __future__ import annotations
@@ -91,8 +106,22 @@ def train(
     if cfg.use_compile:
         model = torch.compile(model, mode="reduce-overhead")  # type: ignore[assignment]
 
-    optimizer = make_optimizer(model, cfg)
-    scheduler = make_scheduler(optimizer, cfg)
+    optimizer_result = make_optimizer(model, cfg)
+    _use_muon = isinstance(optimizer_result, tuple)
+
+    if _use_muon:
+        muon_opt, adamw_opt = optimizer_result
+        muon_scheduler = make_scheduler(muon_opt, cfg)
+        adamw_scheduler = make_scheduler(adamw_opt, cfg)
+        # Represent the "primary" optimizer for LR logging (AdamW embed group).
+        _primary_opt = adamw_opt
+        _schedulers = (muon_scheduler, adamw_scheduler)
+    else:
+        optimizer = optimizer_result
+        scheduler = make_scheduler(optimizer, cfg)
+        _primary_opt = optimizer
+        _schedulers = None
+
     logger = GradientLogger(cfg)
 
     # Surface the non-embedding parameter count (removed from GPT.__init__ print).
@@ -118,8 +147,6 @@ def train(
     batches = make_batches(token_stream, cfg)
 
     # ── Validation batches — consumed eagerly so the same data is reused ─────
-    # Consuming upfront means every val evaluation sees identical inputs,
-    # making val loss comparable across steps.
     _val_batches: list[tuple[torch.Tensor, torch.Tensor]] = []
     if val_token_stream is not None and cfg.val_every > 0:
         _val_batches = list(make_batches(val_token_stream, cfg))
@@ -142,7 +169,7 @@ def train(
     weight_heatmap_rows: list[list[float]] = []
     latest_grad_norms: list[float] = []
 
-    # ── Early stopping state ──────────────────────────────────────────────────
+    # ── Early stopping / best checkpoint state ────────────────────────────────
     _best_val_loss: float = float("inf")
     _patience_counter: int = 0
     _early_stopped: bool = False
@@ -158,7 +185,11 @@ def train(
         inputs = inputs.to(device)
         targets = targets.to(device)
 
-        optimizer.zero_grad()
+        if _use_muon:
+            muon_opt.zero_grad()
+            adamw_opt.zero_grad()
+        else:
+            optimizer.zero_grad()
 
         if use_amp and scaler is not None:
             with torch.amp.autocast("cuda"):
@@ -174,8 +205,10 @@ def train(
 
             scaler.scale(loss).backward()
 
-            # Unscale before clipping so clip threshold is in original units.
-            scaler.unscale_(optimizer)
+            if _use_muon:
+                scaler.unscale_(adamw_opt)
+            else:
+                scaler.unscale_(optimizer)
 
             # Capture pre-clip per-layer norms BEFORE clip_grad_norm_ fires.
             layer_norms_dict: dict[str, float] = {
@@ -187,8 +220,12 @@ def train(
                 model.parameters(), cfg.grad_clip
             ).item()
 
-            current_lr = optimizer.param_groups[0]["lr"]
-            scaler.step(optimizer)
+            current_lr = _primary_opt.param_groups[0]["lr"]
+            if _use_muon:
+                scaler.step(adamw_opt)
+                muon_opt.step()
+            else:
+                scaler.step(optimizer)
             scaler.update()
         else:
             logits = model(inputs)
@@ -214,10 +251,18 @@ def train(
                 model.parameters(), cfg.grad_clip
             ).item()
 
-            current_lr = optimizer.param_groups[0]["lr"]
-            optimizer.step()
+            current_lr = _primary_opt.param_groups[0]["lr"]
+            if _use_muon:
+                muon_opt.step()
+                adamw_opt.step()
+            else:
+                optimizer.step()
 
-        scheduler.step()
+        if _use_muon:
+            muon_scheduler.step()
+            adamw_scheduler.step()
+        else:
+            scheduler.step()
 
         loss_val = loss.item()
 
@@ -287,12 +332,22 @@ def train(
             val_steps_list.append(step)
             val_losses_list.append(val_loss_avg)
 
-            # ── Early stopping ────────────────────────────────────────────────
-            if cfg.early_stopping_patience > 0:
-                if val_loss_avg < _best_val_loss:
-                    _best_val_loss = val_loss_avg
-                    _patience_counter = 0
-                else:
+            # ── Best checkpoint + early stopping ──────────────────────────────
+            if val_loss_avg < _best_val_loss:
+                _best_val_loss = val_loss_avg
+                _patience_counter = 0
+                # Save best.pt whenever val loss improves.
+                _sched_to_save = _schedulers if _use_muon else scheduler
+                save_checkpoint(
+                    model,
+                    optimizer_result,
+                    step,
+                    cfg,
+                    scheduler=_sched_to_save,
+                    save_as_best=True,
+                )
+            else:
+                if cfg.early_stopping_patience > 0:
                     _patience_counter += 1
                     if _patience_counter >= cfg.early_stopping_patience:
                         _log.info(
@@ -335,13 +390,7 @@ def train(
             if latest_grad_norms:
                 plot_grad_hist(latest_grad_norms, plot_dir / "grad_hist.png")
 
-        # ── Checkpoint ────────────────────────────────────────────────────────
-        if (step + 1) % cfg.checkpoint_every == 0:
-            save_checkpoint(model, optimizer, step + 1, cfg, scheduler=scheduler)
-
     # ── Token stream exhaustion guard ──────────────────────────────────────────
-    # If the loop exits before reaching max_steps, the token stream was shorter
-    # than expected. Warn so the caller knows training was cut short.
     steps_completed = step + 1 if step >= 0 else 0
     if not _early_stopped and steps_completed < cfg.max_steps:
         warnings.warn(

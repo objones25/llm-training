@@ -71,6 +71,7 @@ class TrainConfig:
     adamw_eps: float = 1e-8
     ln_lr_mult: float = 3.0      # LR multiplier for LayerNorm params (no weight decay)
     embed_lr_mult: float = 0.1   # LR multiplier for embedding params (no weight decay)
+    use_muon: bool = False       # Use Muon optimizer for matrix params; AdamW for ln+embed
 
     # Data
     dataset_name: str = "HuggingFaceFW/fineweb-edu"
@@ -365,6 +366,13 @@ each test gets written.
 - Do **not** apply weight decay to biases or LayerNorm parameters.
 - LN params are identified by `isinstance(module, nn.LayerNorm)` — name-based matching
   would miss `ln_1`/`ln_2`/`ln_f` naming used in this model.
+- When `cfg.use_muon=True`, the **matrix group** uses the **Muon optimizer** (`src/muon.py`)
+  and the ln+embed groups use AdamW. `make_optimizer` returns a `(Muon, AdamW)` tuple.
+  `train.py` creates two independent LambdaLR schedulers (one per optimizer) so LR
+  trajectories stay in sync. Muon applies Newton-Schulz orthogonalization to gradient
+  updates, normalizing the effective step size across all matrix parameters — eliminating
+  the bimodal gradient distribution structurally. AMP `scaler.unscale_()` is called only
+  on the AdamW optimizer; Muon steps directly without the scaler.
 
 ### Learning rate schedule
 
@@ -412,13 +420,23 @@ each test gets written.
 
 ## Implementation Details & Contracts
 
-### Checkpoint State Preservation
+### Checkpoint Strategy
 
-`save_checkpoint()` and `load_checkpoint()` in `src/checkpoint.py` now **require** passing the scheduler parameter to preserve LR trajectory:
+Training saves a single `best.pt` file (overwriting) whenever validation loss improves. Numbered `checkpoint_{step:07d}.pt` files are **not** written. The `checkpoint_every` config field is retained for backwards compatibility but is unused by the training loop.
+
+`save_checkpoint()` accepts a `save_as_best=True` flag to write to `checkpoint_dir/best.pt`. Pass `save_as_best=False` (default) for numbered checkpoints (legacy, not used by `train.py`).
+
+When using Muon (`use_muon=True`), the `optimizer` argument is a `(Muon, AdamW)` tuple and `scheduler` is a `(LambdaLR, LambdaLR)` tuple. Both are stored and restored correctly by `save_checkpoint`/`load_checkpoint`.
+
+`save_checkpoint()` and `load_checkpoint()` **require** passing the scheduler parameter to preserve LR trajectory:
 
 ```python
-# Saving
-save_checkpoint(model, optimizer, step, cfg, scheduler=scheduler)
+# Saving (single optimizer)
+save_checkpoint(model, optimizer, step, cfg, scheduler=scheduler, save_as_best=True)
+
+# Saving (Muon + AdamW tuple)
+save_checkpoint(model, (muon_opt, adamw_opt), step, cfg,
+                scheduler=(muon_sched, adamw_sched), save_as_best=True)
 
 # Loading
 load_checkpoint(path, model, optimizer, scheduler=scheduler)

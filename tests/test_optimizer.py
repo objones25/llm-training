@@ -271,3 +271,146 @@ def test_state_save_load_identity(model: GPT, cfg: TrainConfig) -> None:
                 assert val == loaded_val, (
                     f"State mismatch at param {key}, field '{tensor_key}'"
                 )
+
+
+# ── Muon / use_muon tests ─────────────────────────────────────────────────────
+
+
+def test_make_optimizer_returns_adamw_when_use_muon_false(
+    model: GPT, cfg: TrainConfig
+) -> None:
+    """Default (use_muon=False) must return a single AdamW instance."""
+    assert cfg.use_muon is False
+    opt = make_optimizer(model, cfg)
+    assert isinstance(opt, torch.optim.AdamW)
+
+
+def test_make_optimizer_returns_tuple_when_use_muon_true(
+    model: GPT, cfg: TrainConfig
+) -> None:
+    """use_muon=True must return a (Muon, AdamW) tuple."""
+    from src.muon import Muon as MuonCls
+
+    muon_cfg = TrainConfig(
+        vocab_size=cfg.vocab_size,
+        n_layers=cfg.n_layers,
+        d_model=cfg.d_model,
+        n_heads=cfg.n_heads,
+        d_ff=cfg.d_ff,
+        seq_len=cfg.seq_len,
+        batch_size=cfg.batch_size,
+        learning_rate=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+        ln_lr_mult=cfg.ln_lr_mult,
+        embed_lr_mult=cfg.embed_lr_mult,
+        use_muon=True,
+    )
+    result = make_optimizer(model, muon_cfg)
+    assert isinstance(result, tuple), "Expected tuple when use_muon=True"
+    assert len(result) == 2
+    muon_opt, adamw_opt = result
+    assert isinstance(muon_opt, MuonCls)
+    assert isinstance(adamw_opt, torch.optim.AdamW)
+
+
+def test_muon_group_contains_only_matrix_params(
+    model: GPT, cfg: TrainConfig
+) -> None:
+    """Muon optimizer must contain only matrix params (no ln, no embed)."""
+    from src.muon import Muon as MuonCls
+
+    muon_cfg = TrainConfig(
+        vocab_size=cfg.vocab_size,
+        n_layers=cfg.n_layers,
+        d_model=cfg.d_model,
+        n_heads=cfg.n_heads,
+        d_ff=cfg.d_ff,
+        seq_len=cfg.seq_len,
+        batch_size=cfg.batch_size,
+        learning_rate=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+        ln_lr_mult=cfg.ln_lr_mult,
+        embed_lr_mult=cfg.embed_lr_mult,
+        use_muon=True,
+    )
+    muon_opt, _ = make_optimizer(model, muon_cfg)
+
+    muon_ids = {id(p) for g in muon_opt.param_groups for p in g["params"]}
+
+    ln_ids: set[int] = set()
+    for module in model.modules():
+        if isinstance(module, nn.LayerNorm):
+            for p in module.parameters():
+                ln_ids.add(id(p))
+    embed_ids = {id(p) for n, p in model.named_parameters() if "embedding" in n}
+
+    for pid in muon_ids:
+        assert pid not in ln_ids, "Muon group contains a LayerNorm param"
+        assert pid not in embed_ids, "Muon group contains an embedding param"
+
+
+def test_adamw_group_has_ln_and_embed_when_use_muon_true(
+    model: GPT, cfg: TrainConfig
+) -> None:
+    """When use_muon=True, AdamW must cover all ln and embed params."""
+    muon_cfg = TrainConfig(
+        vocab_size=cfg.vocab_size,
+        n_layers=cfg.n_layers,
+        d_model=cfg.d_model,
+        n_heads=cfg.n_heads,
+        d_ff=cfg.d_ff,
+        seq_len=cfg.seq_len,
+        batch_size=cfg.batch_size,
+        learning_rate=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+        ln_lr_mult=cfg.ln_lr_mult,
+        embed_lr_mult=cfg.embed_lr_mult,
+        use_muon=True,
+    )
+    _, adamw_opt = make_optimizer(model, muon_cfg)
+
+    adamw_ids = {id(p) for g in adamw_opt.param_groups for p in g["params"]}
+
+    ln_ids: set[int] = set()
+    for module in model.modules():
+        if isinstance(module, nn.LayerNorm):
+            for p in module.parameters():
+                ln_ids.add(id(p))
+    embed_ids = {id(p) for n, p in model.named_parameters() if "embedding" in n}
+
+    for pid in ln_ids:
+        assert pid in adamw_ids, "AdamW is missing a LayerNorm param"
+    for pid in embed_ids:
+        assert pid in adamw_ids, "AdamW is missing an embedding param"
+
+
+def test_all_params_covered_exactly_once_use_muon_true(
+    model: GPT, cfg: TrainConfig
+) -> None:
+    """With use_muon=True, every trainable param must appear in exactly one optimizer."""
+    muon_cfg = TrainConfig(
+        vocab_size=cfg.vocab_size,
+        n_layers=cfg.n_layers,
+        d_model=cfg.d_model,
+        n_heads=cfg.n_heads,
+        d_ff=cfg.d_ff,
+        seq_len=cfg.seq_len,
+        batch_size=cfg.batch_size,
+        learning_rate=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+        ln_lr_mult=cfg.ln_lr_mult,
+        embed_lr_mult=cfg.embed_lr_mult,
+        use_muon=True,
+    )
+    muon_opt, adamw_opt = make_optimizer(model, muon_cfg)
+
+    all_ids = [id(p) for g in muon_opt.param_groups for p in g["params"]]
+    all_ids += [id(p) for g in adamw_opt.param_groups for p in g["params"]]
+    trainable_ids = [id(p) for p in model.parameters() if p.requires_grad]
+
+    assert len(all_ids) == len(trainable_ids), (
+        f"Combined param count ({len(all_ids)}) != model param count ({len(trainable_ids)})"
+    )
+    assert sorted(all_ids) == sorted(trainable_ids), (
+        "Combined param groups do not exactly match the model's trainable parameters"
+    )

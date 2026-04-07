@@ -184,18 +184,34 @@ def test_nan_loss_raises_runtime_error(
         train(cfg, token_stream=_token_stream())
 
 
-# ── Checkpointing cadence ─────────────────────────────────────────────────────
+# ── Checkpointing ─────────────────────────────────────────────────────────────
 
 
-def test_checkpoint_created_at_interval(tmp_path: Path) -> None:
-    """A checkpoint file must be created after every checkpoint_every steps."""
-    cfg = _cfg(tmp_path, max_steps=6, checkpoint_every=3)
+def test_best_checkpoint_saved_on_val_improvement(tmp_path: Path) -> None:
+    """best.pt must be created whenever val loss improves."""
+    cfg = _cfg(tmp_path, max_steps=10, val_every=2, val_batches=2)
     torch.manual_seed(0)
-    train(cfg, token_stream=_token_stream())
+    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
     ckpt_dir = Path(cfg.checkpoint_dir)
-    assert (ckpt_dir / "checkpoint_0000003.pt").exists(), (
-        "Expected checkpoint at step 3"
-    )
+    assert (ckpt_dir / "best.pt").exists(), "Expected best.pt to be created"
+
+
+def test_no_numbered_checkpoints_created(tmp_path: Path) -> None:
+    """Numbered checkpoint files (checkpoint_*.pt) must never be created."""
+    cfg = _cfg(tmp_path, max_steps=10, val_every=2, val_batches=2)
+    torch.manual_seed(0)
+    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
+    ckpt_dir = Path(cfg.checkpoint_dir)
+    numbered = list(ckpt_dir.glob("checkpoint_*.pt")) if ckpt_dir.exists() else []
+    assert numbered == [], f"Unexpected numbered checkpoints: {numbered}"
+
+
+def test_smoke_muon_train(tmp_path: Path) -> None:
+    """use_muon=True: 10-step smoke run must complete and loss must decrease."""
+    cfg = _cfg(tmp_path, max_steps=10, warmup_steps=2, use_muon=True)
+    torch.manual_seed(0)
+    model = train(cfg, token_stream=_token_stream())
+    assert isinstance(model, GPT)
 
 
 # ── Plots cadence ─────────────────────────────────────────────────────────────

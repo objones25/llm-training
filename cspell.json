@@ -47,6 +47,18 @@
     "RunPod",
     "orthogonalization",
     "accum",
-    "isinstance"
+    "isinstance",
+    "newtonschulz",
+    "zeropower",
+    "randn",
+    "linalg",
+    "nesterov",
+    "initialised",
+    "orthogonalize",
+    "orthogonalized",
+    "Frobenius",
+    "autocast",
+    "maxs",
+    "sched"
   ]
 }
