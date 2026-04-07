@@ -341,6 +341,19 @@ each test gets written.
 
 ## Architecture Guidance (from `deep_dive.md`)
 
+### Architectural philosophy
+
+**Prefer standard defaults over novelty.** This project uses GPT-2 style conventions — learned absolute positional embeddings, LayerNorm, standard GELU FF blocks — because they are well-understood, well-tested, and sufficient at the current scale (`seq_len=512`, ~600M parameters). The added complexity of RoPE, RMSNorm, SwiGLU, or DDP is not justified until the model is scaled up.
+
+Before adopting any architectural change, ask: does this provide a measurable benefit at the target `N` and `D`? If the answer is "only at larger scale", defer it. Keep the implementation surface small and the diagnostics interpretable.
+
+Changes that become worthwhile at larger scale:
+
+- **RoPE** — when `seq_len > 512` or generalization beyond trained length is needed
+- **RMSNorm** — drop-in LayerNorm replacement; marginal benefit, low cost, worth adding at the next major rewrite
+- **SwiGLU** — outperforms GELU at the same parameter count; worthwhile for any serious scaled run
+- **DDP** — required to use more than one GPU; adds significant implementation surface
+
 ### Scaling decisions
 
 - **Depth vs. width barely matters** — choose for engineering reasons. Performance depends
@@ -475,16 +488,6 @@ All gradient norms logged (both total and per-layer) are computed **before** `to
 - You cannot diagnose vanishing or exploding gradients from post-clip values
 
 The training loop captures per-layer norms in a dictionary before clipping, then clips, then logs.
-
-### Embedding Output Scaling
-
-The embeddings (token + positional) are scaled by `sqrt(d_model)` in `GPT.forward()` before being passed to the first transformer block. This is the GPT-3 style initialization:
-
-```python
-x = (token_emb + pos_emb) * math.sqrt(self.d_model)
-```
-
-The scaling factor is pre-computed in `__init__` as `self._embed_scale` to avoid recomputation in the forward pass. This stabilizes training with embeddings of the same magnitude as the transformer blocks' hidden states.
 
 ### Model Parameter Count Attribute
 
