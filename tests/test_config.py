@@ -132,3 +132,42 @@ def test_compile_amp_defaults_off() -> None:
     cfg = TrainConfig(**_valid_kwargs())
     assert cfg.use_compile is False
     assert cfg.use_amp is False
+
+
+def test_lr_mult_defaults() -> None:
+    """ln_lr_mult and embed_lr_mult must have the expected defaults."""
+    cfg = TrainConfig(**_valid_kwargs())
+    assert cfg.ln_lr_mult == 3.0
+    assert cfg.embed_lr_mult == 0.1
+
+
+def test_zero_ln_lr_mult_raises() -> None:
+    """ln_lr_mult=0 must raise ValueError."""
+    kw = _valid_kwargs()
+    kw["ln_lr_mult"] = 0.0
+    with pytest.raises(ValueError, match="ln_lr_mult"):
+        TrainConfig(**kw)
+
+
+def test_negative_ln_lr_mult_raises() -> None:
+    """ln_lr_mult < 0 must raise ValueError."""
+    kw = _valid_kwargs()
+    kw["ln_lr_mult"] = -1.0
+    with pytest.raises(ValueError, match="ln_lr_mult"):
+        TrainConfig(**kw)
+
+
+def test_zero_embed_lr_mult_raises() -> None:
+    """embed_lr_mult=0 must raise ValueError."""
+    kw = _valid_kwargs()
+    kw["embed_lr_mult"] = 0.0
+    with pytest.raises(ValueError, match="embed_lr_mult"):
+        TrainConfig(**kw)
+
+
+def test_negative_embed_lr_mult_raises() -> None:
+    """embed_lr_mult < 0 must raise ValueError."""
+    kw = _valid_kwargs()
+    kw["embed_lr_mult"] = -0.5
+    with pytest.raises(ValueError, match="embed_lr_mult"):
+        TrainConfig(**kw)

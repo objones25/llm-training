@@ -1,5 +1,6 @@
 {
   "version": "0.2",
+  "ignorePaths": ["cspell.json"],
   "words": [
     "adamw",
     "Besiroglu",
@@ -29,6 +30,23 @@
     "pytest",
     "Sardana",
     "tiktoken",
-    "deserialize"
+    "caplog",
+    "capsys",
+    "classmethod",
+    "deserialize",
+    "TFLOPS",
+    "overfitting",
+    "underparameterized",
+    "understepping",
+    "Orthogonalizes",
+    "mult",
+    "evals",
+    "EFLOP",
+    "EFLOPs",
+    "runpod",
+    "RunPod",
+    "orthogonalization",
+    "accum",
+    "isinstance"
   ]
 }

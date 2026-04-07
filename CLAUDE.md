@@ -52,10 +52,10 @@ All hyperparameters must be defined in `src/config.py` as a dataclass. Nothing i
 class TrainConfig:
     # Model
     vocab_size: int = 8192
-    n_layers: int = 6
-    d_model: int = 512
-    n_heads: int = 8
-    d_ff: int = 2048
+    n_layers: int = 12
+    d_model: int = 2048
+    n_heads: int = 32
+    d_ff: int = 8192
 
     # Training
     max_steps: int = 20_000
@@ -69,6 +69,8 @@ class TrainConfig:
     # Optimizer
     adamw_betas: tuple[float, float] = (0.9, 0.999)
     adamw_eps: float = 1e-8
+    ln_lr_mult: float = 3.0      # LR multiplier for LayerNorm params (no weight decay)
+    embed_lr_mult: float = 0.1   # LR multiplier for embedding params (no weight decay)
 
     # Data
     dataset_name: str = "HuggingFaceFW/fineweb-edu"
@@ -94,7 +96,7 @@ class TrainConfig:
     weight_log_every: int = 500       # cadence for per-layer weight norm logging
     plot_every: int = 500             # cadence for saving plots to disk
     grad_norm_warn_threshold: float = 10.0  # per-layer threshold; emits WARNING line
-    grad_norm_spike_threshold: float = 1.5 # total-norm threshold; dumps all layers immediately
+    grad_norm_spike_threshold: float = 2.5 # total-norm threshold; dumps all layers immediately
     plot_dir: str = "plots"
     log_file: str = "train.log"            # verbose DEBUG log; "" disables file logging
 
@@ -119,6 +121,7 @@ Tests must instantiate `TrainConfig` explicitly with any overrides they need. Ne
 - `warmup_steps`, `val_every`, `early_stopping_patience` must be non-negative
 - `warmup_steps` must be strictly less than `max_steps`
 - `d_model` must be divisible by `n_heads` (required for multi-head attention)
+- `ln_lr_mult`, `embed_lr_mult` must be strictly positive
 
 When testing invalid configs, construct them **inside** `pytest.raises(ValueError)` blocks — never before. If constructed outside the block, the exception is raised immediately and the test fails. See rule 28 below for the correct pattern.
 
@@ -131,6 +134,7 @@ All logging logic lives in `src/logger.py`. Output routes through Python's `logg
 ### Setup
 
 `train.py` calls `configure_logging(cfg)` once before the training loop. This attaches:
+
 - **Console (StreamHandler, INFO)** — one terse summary line per step + WARNING lines
 - **File (FileHandler, DEBUG)** — everything: per-layer grad/weight norms, step summary, WARNINGs
 
@@ -252,21 +256,23 @@ means you can inspect the latest state at any point during a run without waiting
 
 ## Commands
 
+**Always use `uv run` to execute Python scripts and tools in this project.** Never call `python` or `pytest` directly — they will use the wrong interpreter and miss project dependencies.
+
 ```bash
 # Install dependencies
 uv sync
 
 # Run all tests
-pytest -x --tb=short
+uv run python -m pytest -x --tb=short
 
 # Run a single test file
-pytest tests/test_tokenizer.py -x --tb=short
+uv run python -m pytest tests/test_tokenizer.py -x --tb=short
 
 # Run a specific test
-pytest tests/test_model.py::test_forward_pass_shape -x --tb=short
+uv run python -m pytest tests/test_model.py::test_forward_pass_shape -x --tb=short
 
 # Run tests with coverage
-pytest --cov=src --cov-report=term-missing -x --tb=short
+uv run python -m pytest --cov=src --cov-report=term-missing -x --tb=short
 ```
 
 ---
@@ -348,8 +354,17 @@ each test gets written.
 
 - Use **AdamW**, not Adam. AdamW trains worse for most of the run but ends better.
   Decoupled weight decay matters especially at scale.
-- Do not apply weight decay to biases or LayerNorm parameters. Group parameters explicitly
-  in `optimizer.py`.
+- `optimizer.py` splits parameters into **three explicit groups**:
+  - **ln group** — LayerNorm parameters (identified by module type, not name).
+    `lr = learning_rate × ln_lr_mult` (default 3×). No weight decay.
+    Rationale: LN gradients are bounded by construction (~10⁻²); higher LR compensates.
+  - **embed group** — Embedding parameters (token + position).
+    `lr = learning_rate × embed_lr_mult` (default 0.1×). No weight decay.
+  - **matrix group** — All remaining weight matrices (QKV, out_proj, FF, lm_head).
+    `lr = learning_rate`. Weight decay = `cfg.weight_decay`.
+- Do **not** apply weight decay to biases or LayerNorm parameters.
+- LN params are identified by `isinstance(module, nn.LayerNorm)` — name-based matching
+  would miss `ln_1`/`ln_2`/`ln_f` naming used in this model.
 
 ### Learning rate schedule
 
@@ -367,6 +382,10 @@ each test gets written.
 - Scale model size `N` and token count `D` equally as compute increases.
 - For inference-heavy use, prefer **smaller model + more tokens** over a larger compute-optimal model.
 - Do **not** train to full convergence — stop ~10% above the converged loss.
+
+**Dataset scale (measured):** `train.bin` = 11.66B tokens (23.3 GB), `val.bin` = 117.9M tokens. Total 11.78B tokens.
+
+**Chinchilla-optimal for this dataset:** `N_optimal = 11.78B / 20 ≈ 589M non-embedding params`. The current 18.9M-param model consumed only 328M of 11.78B available tokens (2.8%). A compute-optimal next run uses `n_layers=12, d_model=2048, n_heads=32, d_ff=8192` (604M params) trained on the full dataset — approximately 12 GPU-hours on an H100.
 
 ---
 
@@ -418,12 +437,14 @@ If you resume training without passing `scheduler=`, the scheduler starts from i
 During generation with KV cache, `is_causal` is set to `True` only when processing more than one token (prefill phase); single-token generation sets `is_causal=False` since the cache contains full history.
 
 KV cache is defined in `src/kv_cache.py`:
+
 - `LayerKVCache` dataclass: stores accumulated K and V tensors `[B, n_heads, T_cached, head_dim]` for one layer
 - `KVCache` dataclass: list of `LayerKVCache` objects, one per transformer layer
 - `KVCache.empty()` classmethod: creates zero-length cache ready for prefill
 - `kv_cache.seq_len` property: returns current cached sequence length
 
 The model's forward pass accepts an optional `kv_cache` parameter:
+
 - `kv_cache=None` (training): standard transformer, O(T²) attention
 - `kv_cache` provided (generation): two-phase prefill+generate, O(T) per token
 

@@ -96,17 +96,17 @@ uv run python scripts/run_training.py --train-bin data/train.bin
 
 **Options:**
 
-| Flag                         | Default          | Description                                               |
-| ---------------------------- | ---------------- | --------------------------------------------------------- |
-| `--train-bin`                | `data/train.bin` | Path to the uint16 training token file                    |
-| `--val-bin`                  | `data/val.bin`   | Path to the uint16 validation token file (skipped if absent) |
-| `--max-steps`                | `20000`          | Total training steps                                      |
-| `--batch-size`               | `32`             | Sequences per batch                                       |
-| `--learning-rate`            | `1.5e-4`         | Peak learning rate (after warmup)                         |
-| `--checkpoint-dir`           | `checkpoints`    | Directory for checkpoint `.pt` files                      |
-| `--plot-dir`                 | `plots`          | Directory for saved plot images                           |
-| `--device`                   | `cpu`            | Training device: `cpu`, `mps`, `cuda`                     |
-| `--early-stopping-patience`  | `0`              | Val evals without improvement before stopping; 0 disables |
+| Flag                        | Default          | Description                                                  |
+| --------------------------- | ---------------- | ------------------------------------------------------------ |
+| `--train-bin`               | `data/train.bin` | Path to the uint16 training token file                       |
+| `--val-bin`                 | `data/val.bin`   | Path to the uint16 validation token file (skipped if absent) |
+| `--max-steps`               | `20000`          | Total training steps                                         |
+| `--batch-size`              | `32`             | Sequences per batch                                          |
+| `--learning-rate`           | `1.5e-4`         | Peak learning rate (after warmup)                            |
+| `--checkpoint-dir`          | `checkpoints`    | Directory for checkpoint `.pt` files                         |
+| `--plot-dir`                | `plots`          | Directory for saved plot images                              |
+| `--device`                  | `cpu`            | Training device: `cpu`, `mps`, `cuda`                        |
+| `--early-stopping-patience` | `0`              | Val evals without improvement before stopping; 0 disables    |
 
 **Example — Apple Silicon with validation and early stopping:**
 
@@ -144,15 +144,15 @@ uv run python scripts/run_training.py \
 
 **Advanced options in `src/config.py`:**
 
-| Field                        | Default | Purpose                                          |
-| ---------------------------- | ------- | ------------------------------------------------ |
-| `adamw_betas`                | (0.9, 0.999)    | AdamW momentum and variance decay rates          |
-| `adamw_eps`                  | 1e-8    | AdamW numerical stability constant               |
-| `use_compile`                | False   | Enable `torch.compile()` (adds 30-60s startup)   |
-| `use_amp`                    | False   | Automatic mixed precision (CUDA only)            |
-| `val_every`                  | 250     | Steps between validation-loss evaluations        |
-| `val_batches`                | 20      | Number of validation batches per evaluation      |
-| `grad_norm_spike_threshold`  | 1.5     | Total norm threshold for immediate layer dump    |
+| Field                       | Default      | Purpose                                        |
+| --------------------------- | ------------ | ---------------------------------------------- |
+| `adamw_betas`               | (0.9, 0.999) | AdamW momentum and variance decay rates        |
+| `adamw_eps`                 | 1e-8         | AdamW numerical stability constant             |
+| `use_compile`               | False        | Enable `torch.compile()` (adds 30-60s startup) |
+| `use_amp`                   | False        | Automatic mixed precision (CUDA only)          |
+| `val_every`                 | 250          | Steps between validation-loss evaluations      |
+| `val_batches`               | 20           | Number of validation batches per evaluation    |
+| `grad_norm_spike_threshold` | 2.5          | Total norm threshold for immediate layer dump  |
 
 **Device selection:**
 
@@ -184,17 +184,17 @@ uv run python scripts/evaluate.py
 
 **Options:**
 
-| Flag                  | Default          | Description                                                    |
-| --------------------- | ---------------- | -------------------------------------------------------------- |
-| `--checkpoint`        | _(auto-detect)_  | Path to a specific `.pt` file; overrides `--checkpoint-dir`    |
-| `--checkpoint-dir`    | `checkpoints`    | Directory to search for the latest checkpoint                  |
-| `--val-bin`           | `data/val.bin`   | Path to the uint16 validation token file                       |
-| `--device`            | _(from cfg)_     | Evaluation device: `cpu`, `mps`, `cuda`                        |
-| `--val-batches`       | `50`             | Max number of val batches to evaluate; `0` for all             |
-| `--no-sample`         | off              | Skip text generation (useful in CI / headless environments)    |
-| `--tokenizer`         | _(auto-detect)_  | Path to tokenizer JSON; auto-discovered from cwd if omitted    |
-| `--top-k`             | `50`             | Top-k value for sampling; set to `1` for greedy decoding      |
-| `--max-new-tokens`    | `100`            | Number of tokens to generate in the sample                     |
+| Flag               | Default         | Description                                                 |
+| ------------------ | --------------- | ----------------------------------------------------------- |
+| `--checkpoint`     | _(auto-detect)_ | Path to a specific `.pt` file; overrides `--checkpoint-dir` |
+| `--checkpoint-dir` | `checkpoints`   | Directory to search for the latest checkpoint               |
+| `--val-bin`        | `data/val.bin`  | Path to the uint16 validation token file                    |
+| `--device`         | _(from cfg)_    | Evaluation device: `cpu`, `mps`, `cuda`                     |
+| `--val-batches`    | `50`            | Max number of val batches to evaluate; `0` for all          |
+| `--no-sample`      | off             | Skip text generation (useful in CI / headless environments) |
+| `--tokenizer`      | _(auto-detect)_ | Path to tokenizer JSON; auto-discovered from cwd if omitted |
+| `--top-k`          | `50`            | Top-k value for sampling; set to `1` for greedy decoding    |
+| `--max-new-tokens` | `100`           | Number of tokens to generate in the sample                  |
 
 **Example — evaluate the latest checkpoint on MPS, no sample output:**
 

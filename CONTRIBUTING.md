@@ -54,17 +54,17 @@ from step one — never add observability after the fact.
 Read the relevant section of `deep_dive.md` first. For each component, the minimum required
 reading is:
 
-| Component       | Minimum reading                                    |
-| --------------- | -------------------------------------------------- |
-| `model.py`      | Sections 2, 3 (architecture, FLOPs accounting)     |
+| Component       | Minimum reading                                         |
+| --------------- | ------------------------------------------------------- |
+| `model.py`      | Sections 2, 3 (architecture, FLOPs accounting)          |
 | `kv_cache.py`   | Attention Mechanism and KV Cache section in `CLAUDE.md` |
-| `optimizer.py`  | Section 4 (AdamW finding)                          |
-| `scheduler.py`  | Section 4 (cosine schedule constraint)             |
-| `dataloader.py` | Section 8 (critical batch size)                    |
-| `logger.py`     | Logging Contract in `CLAUDE.md`                    |
-| `plots.py`      | Plots Contract in `CLAUDE.md`                      |
-| `train.py`      | Sections 6, 7 (compute-optimal, inference scaling) |
-| `config.py`     | Pre-Training Checklist in `CLAUDE.md`              |
+| `optimizer.py`  | Section 4 (AdamW finding)                               |
+| `scheduler.py`  | Section 4 (cosine schedule constraint)                  |
+| `dataloader.py` | Section 8 (critical batch size)                         |
+| `logger.py`     | Logging Contract in `CLAUDE.md`                         |
+| `plots.py`      | Plots Contract in `CLAUDE.md`                           |
+| `train.py`      | Sections 6, 7 (compute-optimal, inference scaling)      |
+| `config.py`     | Pre-Training Checklist in `CLAUDE.md`                   |
 
 If you make an architecture or hyperparameter decision that isn't grounded in `deep_dive.md`,
 document your reasoning explicitly in a code comment.
@@ -251,20 +251,20 @@ A PR will not be merged unless:
 
 ## Common Mistakes to Avoid
 
-| Mistake                                  | Consequence                                   | Fix                                           |
-| ---------------------------------------- | --------------------------------------------- | --------------------------------------------- |
-| Using `Adam` instead of `AdamW`          | Worse final loss, especially at scale         | Always use `AdamW`                            |
-| Setting cosine length > `max_steps`      | Measurable loss degradation                   | Enforce the guard in `scheduler.py`           |
-| Comparing `N` including embeddings       | Misleading scale comparisons                  | Always report non-embedding N                 |
-| Not checking `nan` gradients             | Silent corruption of all subsequent steps     | Rule 10: check for `nan` and `inf` explicitly |
-| Hardcoding hyperparameters in `train.py` | Untestable, non-reproducible runs             | Everything goes in `TrainConfig`              |
-| Training to full convergence             | Wastes compute                                | Stop ~10% above converged loss                |
-| Writing tests after implementation       | Tests rationalize code rather than specify it | Interface → tests → implementation, always    |
-| Putting plot logic in `train.py`         | Untestable, bloated training loop             | All plots live in `plots.py`                  |
-| Putting log formatting in `train.py`     | Same problem                                  | All logging lives in `logger.py`              |
-| Using a display backend for matplotlib   | Crashes on headless SSH                       | Always set `matplotlib.use("Agg")` first      |
-| Not verifying cached == uncached sampling | Silent mismatch in generation quality         | Test greedy KV cache output matches uncached run      |
-| Forgetting `is_causal` adapts for cache  | Incorrect attention mask during generation    | Set `is_causal=(T>1)` when cache is provided  |
+| Mistake                                   | Consequence                                   | Fix                                              |
+| ----------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
+| Using `Adam` instead of `AdamW`           | Worse final loss, especially at scale         | Always use `AdamW`                               |
+| Setting cosine length > `max_steps`       | Measurable loss degradation                   | Enforce the guard in `scheduler.py`              |
+| Comparing `N` including embeddings        | Misleading scale comparisons                  | Always report non-embedding N                    |
+| Not checking `nan` gradients              | Silent corruption of all subsequent steps     | Rule 10: check for `nan` and `inf` explicitly    |
+| Hardcoding hyperparameters in `train.py`  | Untestable, non-reproducible runs             | Everything goes in `TrainConfig`                 |
+| Training to full convergence              | Wastes compute                                | Stop ~10% above converged loss                   |
+| Writing tests after implementation        | Tests rationalize code rather than specify it | Interface → tests → implementation, always       |
+| Putting plot logic in `train.py`          | Untestable, bloated training loop             | All plots live in `plots.py`                     |
+| Putting log formatting in `train.py`      | Same problem                                  | All logging lives in `logger.py`                 |
+| Using a display backend for matplotlib    | Crashes on headless SSH                       | Always set `matplotlib.use("Agg")` first         |
+| Not verifying cached == uncached sampling | Silent mismatch in generation quality         | Test greedy KV cache output matches uncached run |
+| Forgetting `is_causal` adapts for cache   | Incorrect attention mask during generation    | Set `is_causal=(T>1)` when cache is provided     |
 
 ---
 

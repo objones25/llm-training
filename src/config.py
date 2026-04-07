@@ -7,10 +7,10 @@ from dataclasses import dataclass
 class TrainConfig:
     # Model
     vocab_size: int = 8192
-    n_layers: int = 6
-    d_model: int = 512
-    n_heads: int = 8
-    d_ff: int = 2048
+    n_layers: int = 12
+    d_model: int = 2048
+    n_heads: int = 32
+    d_ff: int = 8192
 
     # Training
     max_steps: int = 20_000
@@ -24,6 +24,8 @@ class TrainConfig:
     # Optimizer
     adamw_betas: tuple[float, float] = (0.9, 0.999)
     adamw_eps: float = 1e-8
+    ln_lr_mult: float = 3.0      # LR multiplier for LayerNorm params (no weight decay)
+    embed_lr_mult: float = 0.1   # LR multiplier for embedding params (no weight decay)
 
     # Data
     dataset_name: str = "HuggingFaceFW/fineweb-edu"
@@ -84,6 +86,14 @@ class TrainConfig:
         if self.grad_norm_spike_threshold <= 0:
             raise ValueError(
                 f"grad_norm_spike_threshold must be positive, got {self.grad_norm_spike_threshold}"
+            )
+        if self.ln_lr_mult <= 0:
+            raise ValueError(
+                f"ln_lr_mult must be positive, got {self.ln_lr_mult}"
+            )
+        if self.embed_lr_mult <= 0:
+            raise ValueError(
+                f"embed_lr_mult must be positive, got {self.embed_lr_mult}"
             )
         if self.d_model % self.n_heads != 0:
             raise ValueError(
