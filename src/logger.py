@@ -67,28 +67,49 @@ class GradientLogger:
             Pre-clip per-layer gradient norms keyed by parameter name.
             Must be captured *before* ``clip_grad_norm_()`` is called so
             the logged values reflect true gradient magnitudes.
+
+        The summary line includes ``grad_norm_max_layer`` — the name of the
+        single layer contributing the highest norm — so spikes can be
+        attributed without waiting for the per-layer cadence.
+
+        If the total gradient norm exceeds ``cfg.grad_norm_spike_threshold``,
+        a full per-layer breakdown is written immediately at DEBUG level
+        (prefix ``spike``), regardless of ``grad_log_every`` cadence.
         """
         if layer_norms:
             norms = list(layer_norms.values())
             grad_norm = math.sqrt(sum(n * n for n in norms))
             grad_norm_min = min(norms)
             grad_norm_max = max(norms)
+            max_layer = max(layer_norms, key=layer_norms.__getitem__)
         else:
             grad_norm = grad_norm_min = grad_norm_max = 0.0
+            max_layer = "none"
 
         _log.info(
             f"step={step} loss={loss:.4f} lr={lr:.6f} "
             f"grad_norm={grad_norm:.4f} "
             f"grad_norm_min={grad_norm_min:.4f} "
-            f"grad_norm_max={grad_norm_max:.4f}"
+            f"grad_norm_max={grad_norm_max:.4f} "
+            f"grad_norm_max_layer={max_layer}"
         )
 
-        threshold = self.cfg.grad_norm_warn_threshold
+        # Per-layer WARNING for individual layers exceeding their threshold.
+        warn_threshold = self.cfg.grad_norm_warn_threshold
         for name, norm in layer_norms.items():
-            if norm > threshold:
+            if norm > warn_threshold:
                 _log.warning(
                     f"WARNING step={step} layer={name} "
-                    f"grad_norm={norm:.4f} exceeds threshold={threshold}"
+                    f"grad_norm={norm:.4f} exceeds threshold={warn_threshold}"
+                )
+
+        # Spike dump: when total norm crosses the spike threshold, write every
+        # layer's norm immediately so the culprit is visible at the exact step,
+        # not just at the next grad_log_every boundary.
+        if grad_norm > self.cfg.grad_norm_spike_threshold:
+            for name, norm in layer_norms.items():
+                _log.debug(
+                    f"spike step={step} layer={name} norm={norm:.4f}"
                 )
 
     def log_val(self, step: int, val_loss: float) -> None:

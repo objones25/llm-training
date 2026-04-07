@@ -72,15 +72,19 @@ def _get_layer_norms(model: GPT) -> dict[str, float]:
 # ── log_step: format and field contracts ─────────────────────────────────────
 
 
-def test_log_step_contains_all_six_fields(
+def test_log_step_contains_required_fields(
     model: GPT, logger: GradientLogger, cfg: TrainConfig, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Every call to log_step must emit all six required key=value fields."""
+    """Every call to log_step must emit all required key=value fields."""
     _run_backward(model, cfg)
     layer_norms = _get_layer_norms(model)
     with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
         logger.log_step(step=100, loss=3.4821, lr=0.000287, layer_norms=layer_norms)
-    for field in ("step=", "loss=", "lr=", "grad_norm=", "grad_norm_min=", "grad_norm_max="):
+    required = (
+        "step=", "loss=", "lr=", "grad_norm=",
+        "grad_norm_min=", "grad_norm_max=", "grad_norm_max_layer=",
+    )
+    for field in required:
         assert any(field in msg for msg in caplog.messages), (
             f"Missing field '{field}' in log_step output"
         )
@@ -341,3 +345,80 @@ def test_log_val_is_info_level(
     records = [r for r in caplog.records if r.message.startswith("val ")]
     assert records, "No val record found"
     assert records[0].levelno == logging.INFO
+
+
+# ── grad_norm_max_layer and spike dump (new) ──────────────────────────────────
+
+
+def test_log_step_max_layer_name_is_correct(
+    model: GPT, logger: GradientLogger, cfg: TrainConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    """grad_norm_max_layer in the step line must name the layer with the
+    highest per-parameter gradient norm."""
+    _run_backward(model, cfg)
+    layer_norms = _get_layer_norms(model)
+    expected_max_layer = max(layer_norms, key=layer_norms.__getitem__)
+
+    with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+        logger.log_step(step=1, loss=1.0, lr=1e-3, layer_norms=layer_norms)
+
+    step_msg = next(msg for msg in caplog.messages if msg.startswith("step="))
+    assert f"grad_norm_max_layer={expected_max_layer}" in step_msg, (
+        f"Expected grad_norm_max_layer={expected_max_layer!r} in: {step_msg!r}"
+    )
+
+
+def test_spike_dump_emitted_when_total_norm_exceeds_threshold(
+    model: GPT, cfg: TrainConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When total grad_norm exceeds grad_norm_spike_threshold, a 'spike' line
+    must be emitted at DEBUG level for every layer in layer_norms."""
+    # Set spike threshold to 0.0 so any non-zero gradient triggers it.
+    spike_cfg = TrainConfig(
+        vocab_size=256, n_layers=2, d_model=64, n_heads=2, d_ff=128,
+        seq_len=16, batch_size=2,
+        grad_norm_spike_threshold=0.001,  # guaranteed to fire
+    )
+    torch.manual_seed(0)
+    spike_model = GPT(spike_cfg)
+    _run_backward(spike_model, spike_cfg)
+    layer_norms = _get_layer_norms(spike_model)
+
+    spike_logger = GradientLogger(spike_cfg)
+    with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+        spike_logger.log_step(step=42, loss=1.0, lr=1e-3, layer_norms=layer_norms)
+
+    spike_msgs = [msg for msg in caplog.messages if msg.startswith("spike ")]
+    assert len(spike_msgs) == len(layer_norms), (
+        f"Expected {len(layer_norms)} spike lines, got {len(spike_msgs)}"
+    )
+    for name in layer_norms:
+        assert any(f"layer={name}" in msg for msg in spike_msgs), (
+            f"No spike line found for layer '{name}'"
+        )
+    # Format: spike step=N layer=<name> norm=X.XXXX
+    for msg in spike_msgs:
+        assert "step=42" in msg
+        assert "norm=" in msg
+
+
+def test_no_spike_dump_below_threshold(
+    model: GPT, logger: GradientLogger, cfg: TrainConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No spike lines must appear when total grad_norm is below the threshold."""
+    # cfg.grad_norm_spike_threshold defaults to 3.0; set it very high
+    high_cfg = TrainConfig(
+        vocab_size=256, n_layers=2, d_model=64, n_heads=2, d_ff=128,
+        seq_len=16, batch_size=2,
+        grad_norm_spike_threshold=1000.0,
+    )
+    torch.manual_seed(0)
+    high_model = GPT(high_cfg)
+    _run_backward(high_model, high_cfg)
+    layer_norms = _get_layer_norms(high_model)
+
+    with caplog.at_level(logging.DEBUG, logger=_LOGGER_NAME):
+        GradientLogger(high_cfg).log_step(step=1, loss=1.0, lr=1e-3, layer_norms=layer_norms)
+
+    spike_msgs = [msg for msg in caplog.messages if msg.startswith("spike ")]
+    assert spike_msgs == [], f"Unexpected spike messages: {spike_msgs}"

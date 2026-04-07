@@ -48,7 +48,8 @@ class TrainConfig:
     grad_log_every: int = 100
     weight_log_every: int = 500
     plot_every: int = 500
-    grad_norm_warn_threshold: float = 10.0
+    grad_norm_warn_threshold: float = 10.0   # per-layer threshold; emits WARNING line
+    grad_norm_spike_threshold: float = 3.0   # total-norm threshold; dumps all layers immediately
     plot_dir: str = "plots"
     log_file: str = "train.log"
 
@@ -79,6 +80,10 @@ class TrainConfig:
             raise ValueError(
                 f"warmup_steps ({self.warmup_steps}) must be less than "
                 f"max_steps ({self.max_steps})"
+            )
+        if self.grad_norm_spike_threshold <= 0:
+            raise ValueError(
+                f"grad_norm_spike_threshold must be positive, got {self.grad_norm_spike_threshold}"
             )
         if self.d_model % self.n_heads != 0:
             raise ValueError(
