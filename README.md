@@ -185,7 +185,7 @@ uv run python scripts/evaluate.py
 | `--checkpoint-dir`    | `checkpoints`    | Directory to search for the latest checkpoint                  |
 | `--val-bin`           | `data/val.bin`   | Path to the uint16 validation token file                       |
 | `--device`            | _(from cfg)_     | Evaluation device: `cpu`, `mps`, `cuda`                        |
-| `--val-batches`       | _(all)_          | Max number of val batches to evaluate                          |
+| `--val-batches`       | `50`             | Max number of val batches to evaluate; `0` for all             |
 | `--no-sample`         | off              | Skip text generation (useful in CI / headless environments)    |
 | `--tokenizer`         | _(auto-detect)_  | Path to tokenizer JSON; auto-discovered from cwd if omitted    |
 | `--top-k`             | `50`             | Top-k value for sampling; set to `1` for greedy               |

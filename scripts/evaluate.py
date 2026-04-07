@@ -250,8 +250,8 @@ def main() -> None:
     parser.add_argument(
         "--val-batches",
         type=int,
-        default=None,
-        help="Max number of val batches to evaluate (default: all).",
+        default=50,
+        help="Max number of val batches to evaluate (default: 50).  Pass 0 for all.",
     )
     parser.add_argument(
         "--no-sample",
@@ -316,9 +316,12 @@ def main() -> None:
             "\nGenerate it with:  uv run python scripts/pretokenize.py"
         )
 
-    val_batches = list(make_batches(_token_stream_from_bin(val_bin), cfg))
-    if args.val_batches is not None:
-        val_batches = val_batches[: args.val_batches]
+    max_batches = args.val_batches if args.val_batches > 0 else None
+    _batch_stream = make_batches(_token_stream_from_bin(val_bin), cfg)
+    if max_batches is not None:
+        import itertools
+        _batch_stream = itertools.islice(_batch_stream, max_batches)
+    val_batches = list(_batch_stream)
 
     n_tokens = len(val_batches) * cfg.batch_size * cfg.seq_len
     print(f"val data   : {len(val_batches)} batches  ({n_tokens:,} tokens)")
