@@ -30,15 +30,16 @@ previous one pass.
 1.  config.py         — TrainConfig dataclass, no logic
 2.  tokenizer.py      — encode, decode, round-trip fidelity
 3.  model.py          — Transformer forward pass, shape/dtype contracts
-4.  dataset.py        — streaming loader, HuggingFace mock in tests
-5.  dataloader.py     — batching, padding, vocab bounds checks
-6.  scheduler.py      — cosine LR with warmup, schedule length contract
-7.  optimizer.py      — AdamW with correct weight decay grouping
-8.  checkpoint.py     — save/load model + optimizer, logit identity check
-9.  logger.py         — GradientLogger, per-step and per-layer output contracts
-10. plots.py          — all matplotlib plots, file output contracts
-11. train.py          — training loop, logging contract, nan detection
-12. smoke test        — full mini loop: 10 steps, 2-layer, synthetic data
+4.  kv_cache.py       — LayerKVCache and KVCache dataclasses for generation
+5.  dataset.py        — streaming loader, HuggingFace mock in tests
+6.  dataloader.py     — batching, padding, vocab bounds checks
+7.  scheduler.py      — cosine LR with warmup, schedule length contract
+8.  optimizer.py      — AdamW with correct weight decay grouping
+9.  checkpoint.py     — save/load model + optimizer, logit identity check
+10. logger.py         — GradientLogger, per-step and per-layer output contracts
+11. plots.py          — all matplotlib plots, file output contracts
+12. train.py          — training loop, logging contract, nan detection
+13. smoke test        — full mini loop: 10 steps, 2-layer, synthetic data
 ```
 
 The rationale: each layer depends on the one above it. A bug in `model.py` caught before
@@ -56,6 +57,7 @@ reading is:
 | Component       | Minimum reading                                    |
 | --------------- | -------------------------------------------------- |
 | `model.py`      | Sections 2, 3 (architecture, FLOPs accounting)     |
+| `kv_cache.py`   | Attention Mechanism and KV Cache section in `CLAUDE.md` |
 | `optimizer.py`  | Section 4 (AdamW finding)                          |
 | `scheduler.py`  | Section 4 (cosine schedule constraint)             |
 | `dataloader.py` | Section 8 (critical batch size)                    |
@@ -118,6 +120,7 @@ def test_raises_on_nan_loss(cfg):
 - [ ] Gradients are checked for non-None, non-zero, **and** absence of `nan`/`inf`
 - [ ] Disk writes use `tmp_path` only
 - [ ] Plot tests pass synthetic data directly to plot functions — no training loop
+- [ ] KV cache tests verify: (1) correct cache shapes after prefill, (2) cached generation output matches uncached greedy sampling, (3) seq_len property returns correct value
 
 ---
 
@@ -260,6 +263,8 @@ A PR will not be merged unless:
 | Putting plot logic in `train.py`         | Untestable, bloated training loop             | All plots live in `plots.py`                  |
 | Putting log formatting in `train.py`     | Same problem                                  | All logging lives in `logger.py`              |
 | Using a display backend for matplotlib   | Crashes on headless SSH                       | Always set `matplotlib.use("Agg")` first      |
+| Not verifying cached == uncached sampling | Silent mismatch in generation quality         | Test greedy KV cache output matches uncached run      |
+| Forgetting `is_causal` adapts for cache  | Incorrect attention mask during generation    | Set `is_causal=(T>1)` when cache is provided  |
 
 ---
 

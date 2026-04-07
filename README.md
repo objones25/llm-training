@@ -100,9 +100,9 @@ uv run python scripts/run_training.py --train-bin data/train.bin
 | ---------------------------- | ---------------- | --------------------------------------------------------- |
 | `--train-bin`                | `data/train.bin` | Path to the uint16 training token file                    |
 | `--val-bin`                  | `data/val.bin`   | Path to the uint16 validation token file (skipped if absent) |
-| `--max-steps`                | `10000`          | Total training steps                                      |
+| `--max-steps`                | `20000`          | Total training steps                                      |
 | `--batch-size`               | `32`             | Sequences per batch                                       |
-| `--learning-rate`            | `3e-4`           | Peak learning rate (after warmup)                         |
+| `--learning-rate`            | `1.5e-4`         | Peak learning rate (after warmup)                         |
 | `--checkpoint-dir`           | `checkpoints`    | Directory for checkpoint `.pt` files                      |
 | `--plot-dir`                 | `plots`          | Directory for saved plot images                           |
 | `--device`                   | `cpu`            | Training device: `cpu`, `mps`, `cuda`                     |
@@ -132,9 +132,11 @@ uv run python scripts/run_training.py \
 **Output:**
 
 - A summary line is printed before training starts (token count, model size, estimated compute in EFLOPs).
-- Per-step log lines are written to stdout: `step=N loss=X.XXXX lr=X.Xe-XX grad_norm=X.XXXX ...`
-- When `--val-bin` is provided, validation loss is evaluated every `val_every` steps (default: 250) and logged as `val step=N val_loss=X.XXXX`.
-- When `--early-stopping-patience` is set, training stops automatically if val loss has not improved for that many consecutive evaluations.
+- Per-step log lines are written to stdout: `step=N loss=X.XXXX lr=X.Xe-XX grad_norm=X.XXXX grad_norm_min=X.XXXX grad_norm_max=X.XXXX grad_norm_max_layer=<name>`
+- When `--val-bin` is provided and `val_every > 0`, validation loss is evaluated every `val_every` steps and logged as `val step=N val_loss=X.XXXX`.
+- When `--early-stopping-patience` is set to a positive value, training stops automatically if val loss has not improved for that many consecutive evaluations.
+- When any per-layer gradient norm exceeds the threshold, a WARNING line is emitted: `WARNING step=N layer=<name> grad_norm=X.XXXX exceeds threshold=X.X`
+- When the total gradient norm exceeds `grad_norm_spike_threshold`, all per-layer norms are written to the log file immediately (DEBUG level, prefix `spike`).
 - Checkpoints are saved as `checkpoint_NNNNNNN.pt` (7-digit zero-padded step number) every `checkpoint_every` steps (default: 1,000).
 - Six plot files are updated every `plot_every` steps (default: 500): `loss.png`, `lr.png`, `grad_norm.png`, `grad_heatmap.png`, `weight_norm.png`, `grad_hist.png`.
 
@@ -142,12 +144,15 @@ uv run python scripts/run_training.py \
 
 **Advanced options in `src/config.py`:**
 
-| Field         | Default      | Purpose                                        |
-| ------------- | ------------ | ---------------------------------------------- |
-| `adamw_betas` | (0.9, 0.999) | AdamW momentum and variance decay rates        |
-| `adamw_eps`   | 1e-8         | AdamW numerical stability constant             |
-| `use_compile` | False        | Enable `torch.compile()` (adds 30-60s startup) |
-| `use_amp`     | False        | Automatic mixed precision (CUDA only)          |
+| Field                        | Default | Purpose                                          |
+| ---------------------------- | ------- | ------------------------------------------------ |
+| `adamw_betas`                | (0.9, 0.999)    | AdamW momentum and variance decay rates          |
+| `adamw_eps`                  | 1e-8    | AdamW numerical stability constant               |
+| `use_compile`                | False   | Enable `torch.compile()` (adds 30-60s startup)   |
+| `use_amp`                    | False   | Automatic mixed precision (CUDA only)            |
+| `val_every`                  | 250     | Steps between validation-loss evaluations        |
+| `val_batches`                | 20      | Number of validation batches per evaluation      |
+| `grad_norm_spike_threshold`  | 1.5     | Total norm threshold for immediate layer dump    |
 
 **Device selection:**
 
@@ -188,7 +193,7 @@ uv run python scripts/evaluate.py
 | `--val-batches`       | `50`             | Max number of val batches to evaluate; `0` for all             |
 | `--no-sample`         | off              | Skip text generation (useful in CI / headless environments)    |
 | `--tokenizer`         | _(auto-detect)_  | Path to tokenizer JSON; auto-discovered from cwd if omitted    |
-| `--top-k`             | `50`             | Top-k value for sampling; set to `1` for greedy               |
+| `--top-k`             | `50`             | Top-k value for sampling; set to `1` for greedy decoding      |
 | `--max-new-tokens`    | `100`            | Number of tokens to generate in the sample                     |
 
 **Example — evaluate the latest checkpoint on MPS, no sample output:**

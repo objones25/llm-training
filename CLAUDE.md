@@ -23,6 +23,7 @@ src/
   optimizer.py      # AdamW setup and weight decay grouping
   checkpoint.py     # Save and load model + optimizer state
   logger.py         # GradientLogger — per-step and per-layer logging
+  kv_cache.py       # KVCache and LayerKVCache for efficient generation
   plots.py          # All matplotlib visualizations
   train.py          # Training loop, nan detection, calls logger and plots
 tests/
@@ -36,6 +37,8 @@ tests/
   test_logger.py
   test_plots.py
   test_train.py
+  test_kv_cache.py
+  test_config.py
 ```
 
 ---
@@ -55,11 +58,11 @@ class TrainConfig:
     d_ff: int = 2048
 
     # Training
-    max_steps: int = 10_000
+    max_steps: int = 20_000
     batch_size: int = 32
     seq_len: int = 512
-    learning_rate: float = 3e-4
-    warmup_steps: int = 500
+    learning_rate: float = 1.5e-4
+    warmup_steps: int = 1_500
     weight_decay: float = 0.1
     grad_clip: float = 1.0
 
@@ -81,11 +84,17 @@ class TrainConfig:
     checkpoint_dir: str = "checkpoints"
     checkpoint_every: int = 1_000
 
+    # Validation
+    val_every: int = 250              # steps between val-loss evaluations; 0 disables
+    val_batches: int = 20             # number of val batches to average per evaluation
+    early_stopping_patience: int = 0   # val evals without improvement before stopping; 0 disables
+
     # Observability
     grad_log_every: int = 100         # cadence for per-layer gradient norm breakdown
     weight_log_every: int = 500       # cadence for per-layer weight norm logging
     plot_every: int = 500             # cadence for saving plots to disk
-    grad_norm_warn_threshold: float = 10.0  # emits WARNING line, does not stop training
+    grad_norm_warn_threshold: float = 10.0  # per-layer threshold; emits WARNING line
+    grad_norm_spike_threshold: float = 1.5 # total-norm threshold; dumps all layers immediately
     plot_dir: str = "plots"
     log_file: str = "train.log"            # verbose DEBUG log; "" disables file logging
 
@@ -104,10 +113,11 @@ Tests must instantiate `TrainConfig` explicitly with any overrides they need. Ne
 
 `TrainConfig.__post_init__` validates all parameters at construction time:
 
-- `vocab_size`, `batch_size`, `seq_len`, `max_steps` must be positive integers
-- `grad_clip` must be positive
+- `vocab_size`, `batch_size`, `seq_len`, `max_steps`, `val_batches` must be positive integers
+- `grad_clip`, `grad_norm_spike_threshold` must be positive
 - `weight_decay` must be non-negative (zero is allowed, disables weight decay)
-- `warmup_steps` must be non-negative AND strictly less than `max_steps`
+- `warmup_steps`, `val_every`, `early_stopping_patience` must be non-negative
+- `warmup_steps` must be strictly less than `max_steps`
 - `d_model` must be divisible by `n_heads` (required for multi-head attention)
 
 When testing invalid configs, construct them **inside** `pytest.raises(ValueError)` blocks — never before. If constructed outside the block, the exception is raised immediately and the test fails. See rule 28 below for the correct pattern.
@@ -130,6 +140,7 @@ All logging logic lives in `src/logger.py`. Output routes through Python's `logg
 
 ```python
 logger.log_step(step, loss, lr, layer_norms)   # layer_norms: pre-clip dict[str, float]
+logger.log_val(step, val_loss)                  # validation loss checkpoint
 logger.log_layers(step, layer_norms, model)     # grad lines use dict; weight lines use model
 ```
 
@@ -138,10 +149,10 @@ logger.log_layers(step, layer_norms, model)     # grad lines use dict; weight li
 ### Every step — single line to console + file
 
 ```text
-step=100 loss=3.4821 lr=0.000287 grad_norm=1.2341 grad_norm_min=0.0012 grad_norm_max=4.3210
+step=100 loss=3.4821 lr=0.000287 grad_norm=1.2341 grad_norm_min=0.0012 grad_norm_max=4.3210 grad_norm_max_layer=transformer.block.5.ff.w2
 ```
 
-All six fields are required every step. Format is `key=value` pairs separated by spaces.
+All seven fields are required every step. Format is `key=value` pairs separated by spaces. The `grad_norm_max_layer` field identifies which layer contributed the maximum gradient norm — this enables spike attribution without waiting for the per-layer breakdown cadence.
 
 **Important:** All per-layer gradient norms logged here are captured **before** `torch.nn.utils.clip_grad_norm_()` is applied. This is intentional — you must see the true gradient magnitudes before clipping to diagnose instability.
 
@@ -153,6 +164,16 @@ WARNING step=100 layer=transformer.block.5.attn.q_proj grad_norm=14.3201 exceeds
 ```
 
 Training continues — this is observability, not a hard stop.
+
+If the total gradient norm exceeds `grad_norm_spike_threshold`, emit a full per-layer breakdown at DEBUG level immediately:
+
+```text
+spike step=100 layer=transformer.block.0.attn.q_proj norm=0.3821
+spike step=100 layer=transformer.block.5.attn.q_proj norm=14.3201
+spike step=100 layer=transformer.block.5.ff.w2 norm=0.0003
+```
+
+These spike logs are written to file only (DEBUG level), not console, and are unfiltered — every layer is logged regardless of `grad_log_every` cadence. This enables rapid diagnosis of total norm spikes.
 
 ### Every `grad_log_every` steps — per-layer gradient norms
 
@@ -171,6 +192,14 @@ These norms are also **pre-clip**. Compare these values over time to detect vani
 weight step=500 layer=transformer.block.0.attn.q_proj norm=1.2341
 weight step=500 layer=transformer.block.5.ff.w2       norm=0.9821
 ```
+
+### At `val_every` steps — validation loss
+
+```text
+val step=250 val_loss=3.1842
+```
+
+When `val_every > 0` and validation data is available, this line is emitted at INFO level (console and file) every `val_every` training steps. Used for early stopping and convergence tracking.
 
 ---
 
@@ -378,13 +407,25 @@ load_checkpoint(path, model, optimizer, scheduler=scheduler)
 
 If you resume training without passing `scheduler=`, the scheduler starts from its initial state and LR will diverge from the original run — defeating the purpose of resuming. This is a **required pattern**, not optional.
 
-### Attention Mechanism
+### Attention Mechanism and KV Cache
 
-`CausalSelfAttention` in `src/model.py` uses `torch.nn.functional.scaled_dot_product_attention()` with `is_causal=True`. This enables:
+`CausalSelfAttention` in `src/model.py` uses `torch.nn.functional.scaled_dot_product_attention()` with `is_causal=True` during training. This enables:
 
 - FlashAttention-2 on CUDA (hardware-accelerated, memory-efficient)
 - Correct causal masking on all backends
 - Deterministic behavior (no custom mask buffer juggling)
+
+During generation with KV cache, `is_causal` is set to `True` only when processing more than one token (prefill phase); single-token generation sets `is_causal=False` since the cache contains full history.
+
+KV cache is defined in `src/kv_cache.py`:
+- `LayerKVCache` dataclass: stores accumulated K and V tensors `[B, n_heads, T_cached, head_dim]` for one layer
+- `KVCache` dataclass: list of `LayerKVCache` objects, one per transformer layer
+- `KVCache.empty()` classmethod: creates zero-length cache ready for prefill
+- `kv_cache.seq_len` property: returns current cached sequence length
+
+The model's forward pass accepts an optional `kv_cache` parameter:
+- `kv_cache=None` (training): standard transformer, O(T²) attention
+- `kv_cache` provided (generation): two-phase prefill+generate, O(T) per token
 
 ### Gradient Norm Logging — Pre-Clip Timing
 
@@ -395,6 +436,16 @@ All gradient norms logged (both total and per-layer) are computed **before** `to
 - You cannot diagnose vanishing or exploding gradients from post-clip values
 
 The training loop captures per-layer norms in a dictionary before clipping, then clips, then logs.
+
+### Embedding Output Scaling
+
+The embeddings (token + positional) are scaled by `sqrt(d_model)` in `GPT.forward()` before being passed to the first transformer block. This is the GPT-3 style initialization:
+
+```python
+x = (token_emb + pos_emb) * math.sqrt(self.d_model)
+```
+
+The scaling factor is pre-computed in `__init__` as `self._embed_scale` to avoid recomputation in the forward pass. This stabilizes training with embeddings of the same magnitude as the transformer blocks' hidden states.
 
 ### Model Parameter Count Attribute
 
