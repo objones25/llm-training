@@ -13,11 +13,11 @@ class TrainConfig:
     d_ff: int = 2048
 
     # Training
-    max_steps: int = 10_000
+    max_steps: int = 20_000
     batch_size: int = 32
     seq_len: int = 512
-    learning_rate: float = 3e-4
-    warmup_steps: int = 500
+    learning_rate: float = 1.5e-4
+    warmup_steps: int = 1_500
     weight_decay: float = 0.1
     grad_clip: float = 1.0
 
