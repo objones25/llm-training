@@ -79,105 +79,127 @@ learning_rate: float = 2e-4  # was 1.5e-4
 
 ## Cloud GPU Setup
 
-### Recommended Provider: Lambda Labs
+### Current Run: RunPod A100
 
-Lambda Labs offers the best price/performance for single-node H100 jobs.
+**Pod details (2026-04-07 run):**
 
-**Steps:**
+- Provider: RunPod Secure Cloud
+- GPU: 1× A100 (80 GB)
+- Base image: RunPod PyTorch (Lambda Stack 24.04)
+- SSH: `root@195.26.233.65 -p 19914`
+- Workspace: `/workspace/llm-training/`
 
-1. **Create account** at `lambda.ai`
+---
 
-2. **Generate SSH key** (if you don't have one):
+### Reproducing This Setup Step by Step
+
+1. **Provision pod** at `runpod.io` → Secure Cloud
+   - Choose GPU (A100 or H100 depending on availability)
+   - Template: **RunPod PyTorch** (or Lambda Stack — comes with CUDA pre-installed)
+   - Volume: **50 GB** (data ~23.3 GB + checkpoints ~7 GB + overhead)
+   - No network volume needed; no encryption needed
+   - Add your SSH public key under SSH settings
+
+2. **Connect**:
 
    ```bash
-   ssh-keygen -t ed25519 -C "your_email@example.com"
-   cat ~/.ssh/id_ed25519.pub  # copy this to Lambda dashboard
+   ssh -p <port> root@<ip>
    ```
 
-3. **Launch instance**:
-   - Instance type: `1× H100 SXM5 80GB` (~$2.49/hr as of 2026-04)
-   - OS image: `Ubuntu 22.04 LTS + PyTorch`
-   - Add your SSH public key
+   Type `yes` to accept the host key on first connect.
 
-4. **Connect and set up**:
+3. **Install uv and clone repo**:
 
    ```bash
-   ssh ubuntu@<instance_ip>
-
-   # Install uv
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   source $HOME/.cargo/env
-
-   # Clone repo
-   git clone https://github.com/<your_username>/llm-training.git
-   cd llm-training
-
-   # Install dependencies
+   curl -LsSf https://astral.sh/uv/install.sh | sh && source $HOME/.local/bin/env
+   git clone https://github.com/objones25/llm-training.git /workspace/llm-training
+   cd /workspace/llm-training
    uv sync
    ```
 
-5. **Upload pre-tokenized data** (avoids re-tokenizing on the GPU instance):
+4. **Fix PyTorch CUDA compatibility** (RunPod containers have CUDA 12.4 driver; torch 2.11+ requires newer):
 
    ```bash
-   # From your local machine
-   rsync -avz --progress data/train.bin data/val.bin ubuntu@<instance_ip>:llm-training/data/
+   uv pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cu124
    ```
 
-   > train.bin is 23.3 GB — rsync will resume if interrupted.
+   > This is only needed if the pod driver reports version `12040` (`nvidia-smi` shows `CUDA Version: 12.4`).
+   > pyproject.toml already pins `torch>=2.6.0,<2.7.0` so `uv sync` won't override this.
 
-6. **Configure for GPU**:
+5. **Upload pre-tokenized data and .env** (run from your local Mac — not inside the pod):
 
    ```bash
-   # Edit src/config.py or pass overrides via environment / script
-   # Key changes:
-   #   device = "cuda"
-   #   use_amp = True      # BF16 mixed precision on H100
-   #   use_compile = True  # torch.compile for ~20% throughput gain
+   scp -P <port> /Users/theelusivegerbilfish/Python_Projects/llm-training/.env root@<ip>:/workspace/llm-training/
+   scp -P <port> /Users/theelusivegerbilfish/Python_Projects/llm-training/tokenizer.json root@<ip>:/workspace/llm-training/
+   scp -P <port> /Users/theelusivegerbilfish/Python_Projects/llm-training/data/train.bin root@<ip>:/workspace/llm-training/data/
+   scp -P <port> /Users/theelusivegerbilfish/Python_Projects/llm-training/data/val.bin root@<ip>:/workspace/llm-training/data/
    ```
 
-7. **Start training** (inside tmux/screen so it survives disconnect):
+   > train.bin is 23.3 GB — allow ~1–2 hours over a typical connection.
+   > `scp` uses `-P` (capital P) for port, unlike `ssh` which uses `-p`.
+
+6. **Start training** inside tmux (survives disconnect):
 
    ```bash
    tmux new -s train
-   uv run python src/train.py
+   uv run python scripts/run_training.py --train-bin data/train.bin --val-bin data/val.bin --device cuda --use-muon --early-stopping-patience 10
    ```
 
-8. **Monitor**:
+7. **Monitor**:
+
    ```bash
-   # In a second tmux pane
    tail -f train.log
    watch -n 5 nvidia-smi
    ```
 
-### Alternative: RunPod
+---
 
-RunPod is useful when Lambda has low H100 availability.
+### Downloading Results After Training
 
-1. Go to `runpod.io` → **Secure Cloud** → filter for H100 SXM
-2. Select **RunPod PyTorch** template (comes with CUDA + PyTorch pre-installed)
-3. Set **Volume** to 50 GB (for data + checkpoints)
-4. Expose port 22 for SSH
-5. Follow the same setup steps as Lambda above
+Run these from your **local Mac** (not inside the pod):
+
+```bash
+scp -P <port> root@<ip>:/workspace/llm-training/checkpoints/best.pt /Users/theelusivegerbilfish/Python_Projects/llm-training/checkpoints/
+scp -P <port> -r root@<ip>:/workspace/llm-training/plots /Users/theelusivegerbilfish/Python_Projects/llm-training/
+scp -P <port> root@<ip>:/workspace/llm-training/train.log /Users/theelusivegerbilfish/Python_Projects/llm-training/
+```
+
+For the current run (pod IP `195.26.233.65`, port `19914`):
+
+```bash
+scp -P 19914 root@195.26.233.65:/workspace/llm-training/checkpoints/best.pt /Users/theelusivegerbilfish/Python_Projects/llm-training/checkpoints/
+scp -P 19914 -r root@195.26.233.65:/workspace/llm-training/plots /Users/theelusivegerbilfish/Python_Projects/llm-training/
+scp -P 19914 root@195.26.233.65:/workspace/llm-training/train.log /Users/theelusivegerbilfish/Python_Projects/llm-training/
+```
+
+---
+
+### Lambda Labs (Alternative)
+
+Lambda Labs is preferred when H100 availability is good — typically better price/performance than RunPod for long runs.
+
+1. Create account at `lambda.ai`
+2. Launch `1× H100 SXM5 80GB` with Ubuntu 22.04 + PyTorch image
+3. SSH user is `ubuntu` (not `root`); standard port 22
+4. Follow the same steps above — no CUDA compatibility fix needed on Lambda (drivers are kept current)
 
 ---
 
 ## Checkpoint Strategy
 
-With 700k steps at `checkpoint_every=1000`, you'll produce 700 checkpoints. Disk space:
+Training saves a single `checkpoints/best.pt` whenever validation loss improves. No numbered checkpoints are written. Disk footprint is bounded:
 
-```
-~604M params × 4 bytes × ~3 tensors (model + optimizer state) ≈ 7 GB/checkpoint
-700 checkpoints × 7 GB = 4.9 TB  ← DO NOT keep all of them
-```
-
-**Recommended:** checkpoint every 5,000 steps and keep only the last 3:
-
-```python
-# In src/config.py
-checkpoint_every: int = 5_000
+```text
+~604M params × 4 bytes × ~3 tensors (model + optimizer state) ≈ 7 GB (one file)
 ```
 
-Add cleanup logic to `src/checkpoint.py` to delete checkpoints older than the last 3 when saving.
+`best.pt` is overwritten in place on each improvement — safe to download at any point during training.
+
+To resume from a checkpoint:
+
+```bash
+uv run python scripts/run_training.py --train-bin data/train.bin --val-bin data/val.bin --device cuda --use-muon --resume checkpoints/best.pt
+```
 
 ---
 
@@ -190,17 +212,3 @@ Add cleanup logic to `src/checkpoint.py` to delete checkpoints older than the la
 - [ ] `plots/` directory exists and writable before launch
 - [ ] `data/train.bin` and `data/val.bin` present on instance
 
----
-
-## Before This Run: Muon Prerequisite
-
-The bimodal gradient distribution (LN ~10⁻², weight matrices ~10⁻¹) is **structurally irreducible** — it reflects a mathematical difference in how gradients propagate through normalization vs. linear ops.
-
-The three-group AdamW (already implemented) handles the optimizer mismatch by giving each group an appropriate LR. For the 604M run, consider also implementing **Muon** for weight matrix parameters before training:
-
-- Muon applies Newton-Schulz orthogonalization to gradient updates
-- Eliminates bimodality by construction — update norms are uniform regardless of raw gradient magnitude
-- Particularly valuable at 604M scale where training stability matters more
-- Recommended reference: Keller Jordan's Muon implementation (modular-diffusion or muon repo)
-
-Muon is not required for the run to succeed, but it is the most principled fix and worth the implementation cost at this scale.

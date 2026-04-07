@@ -239,6 +239,38 @@ If no tokenizer is found, the sample is printed as raw token IDs instead.
 
 ---
 
+## Future Enhancements
+
+The current architecture uses standard GPT-2 defaults, chosen deliberately — the added complexity of newer techniques isn't justified at `seq_len=512` and ~600M parameters. If the model is scaled up (larger corpus, longer context, more parameters), the following changes become worthwhile:
+
+### Positional embeddings — RoPE
+
+The current learned absolute embedding table (`nn.Embedding(seq_len, d_model)`) cannot generalize beyond the trained sequence length. **Rotary Position Embeddings (RoPE)** encode relative position directly into the Q and K projections inside each attention head, which:
+
+- Generalizes to sequences longer than `seq_len` at inference time
+- Provides a relative-distance inductive bias (adjacent tokens are naturally closer)
+- Is the standard in LLaMA, Mistral, and most post-2022 open models
+
+Implementation change: remove `self.position_embedding`, apply per-head rotation to Q and K inside `CausalSelfAttention.forward()` before the attention dot product.
+
+### Normalization — RMSNorm
+
+Replace `nn.LayerNorm` with **RMSNorm** (no mean-centering, only RMS scaling). Slightly faster, equally stable, and used in LLaMA/Mistral. A one-line swap in the model.
+
+### Feed-forward activation — SwiGLU
+
+Replace the standard two-matrix FF block with a **SwiGLU** gated variant (three matrices: gate, up, down). Used in LLaMA, PaLM, and most modern open models. Consistently outperforms GELU at the same parameter count.
+
+### Multi-GPU — DDP
+
+The current training loop uses a single `cfg.device`. Adding `torch.nn.parallel.DistributedDataParallel` would allow a run to use all GPUs on a multi-GPU instance (e.g. 2× H100), roughly halving wall-clock time.
+
+### Longer context
+
+All three changes above (RoPE + RMSNorm + SwiGLU) are prerequisites for a longer-context run. At `seq_len=512` the quadratic attention cost is negligible; at `seq_len=4096` it becomes the bottleneck and FlashAttention (already enabled via `scaled_dot_product_attention`) becomes essential.
+
+---
+
 ## Running tests
 
 ```bash
