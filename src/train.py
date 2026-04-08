@@ -202,6 +202,9 @@ def train(
             scaler.scale(loss).backward()
 
             if _use_muon:
+                # Unscale both optimizers so clip_grad_norm_ and logged norms
+                # reflect true gradient magnitudes, not AMP-scaled values.
+                scaler.unscale_(muon_opt)
                 scaler.unscale_(adamw_opt)
             else:
                 scaler.unscale_(optimizer)
@@ -216,7 +219,8 @@ def train(
                 model.parameters(), cfg.grad_clip
             ).item()
 
-            current_lr = _primary_opt.param_groups[0]["lr"]
+            # Log the matrix-group LR (Muon) — it's what 95% of the model uses.
+            current_lr = muon_opt.param_groups[0]["lr"] if _use_muon else _primary_opt.param_groups[0]["lr"]
             if _use_muon:
                 scaler.step(adamw_opt)
                 muon_opt.step()
@@ -245,7 +249,8 @@ def train(
                 model.parameters(), cfg.grad_clip
             ).item()
 
-            current_lr = _primary_opt.param_groups[0]["lr"]
+            # Log the matrix-group LR (Muon) — it's what 95% of the model uses.
+            current_lr = muon_opt.param_groups[0]["lr"] if _use_muon else _primary_opt.param_groups[0]["lr"]
             if _use_muon:
                 muon_opt.step()
                 adamw_opt.step()
