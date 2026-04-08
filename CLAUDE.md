@@ -411,8 +411,17 @@ Changes that become worthwhile at larger scale:
   `train.py` creates two independent LambdaLR schedulers (one per optimizer) so LR
   trajectories stay in sync. Muon applies Newton-Schulz orthogonalization to gradient
   updates, normalizing the effective step size across all matrix parameters — eliminating
-  the bimodal gradient distribution structurally. AMP `scaler.unscale_()` is called only
-  on the AdamW optimizer; Muon steps directly without the scaler.
+  the bimodal gradient distribution structurally. When `use_amp=True`, **both** optimizers
+  must be unscaled before `clip_grad_norm_()`: `scaler.unscale_(muon_opt)` then
+  `scaler.unscale_(adamw_opt)`. Muon then steps directly (`muon_opt.step()`); AdamW steps
+  via `scaler.step(adamw_opt)`. The logged `lr` comes from `muon_opt.param_groups[0]["lr"]`
+  (the matrix group), not the AdamW ln-group (which is 3× higher due to `ln_lr_mult`).
+
+  **Critical bug to avoid:** If only AdamW is unscaled, Muon's gradients remain AMP-scaled
+  (~×16384). `clip_grad_norm_` across all params then sees millions instead of single
+  digits, producing a clip ratio of ~1/1,800,000 that crushes AdamW (ln/embed) gradients
+  to zero — those parameters stop learning entirely. Symptom: loss barely moves and logged
+  grad norms stay in the millions for hundreds of steps.
 
 ### Learning rate schedule
 
@@ -537,10 +546,12 @@ Do **not** print this inside `GPT.__init__()` — let the training loop decide w
 Key ordering:
 
 1. `model.train()` is called **once** before the loop, not per-step
-2. Gradient norms are captured **before** `clip_grad_norm_()`
-3. Total norm is obtained directly from the return value of `clip_grad_norm_()`
-4. Loss NaN check happens immediately after loss computation, before backward
-5. Scheduler step is called after optimizer step (standard PyTorch pattern)
+2. When `use_amp=True` and `use_muon=True`: unscale **both** optimizers before norm capture
+3. Gradient norms are captured **before** `clip_grad_norm_()`
+4. Total norm is obtained directly from the return value of `clip_grad_norm_()`
+5. Loss NaN check happens immediately after loss computation, before backward
+6. Scheduler step is called after optimizer step (standard PyTorch pattern)
+7. Logged `lr` is from `muon_opt.param_groups[0]["lr"]` in Muon mode (matrix group)
 
 ---
 
