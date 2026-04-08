@@ -276,6 +276,35 @@ uv run python -m pytest tests/test_model.py::test_forward_pass_shape -x --tb=sho
 uv run python -m pytest --cov=src --cov-report=term-missing -x --tb=short
 ```
 
+### Cloud pod data pipeline
+
+On a cloud pod the local disk (`/root`, typically 20–50 GB) will fill up before
+sample-10BT finishes downloading. Always redirect the HF shard cache and output to
+the persistent volume:
+
+```bash
+# 1. Train the tokenizer (saved to ./tokenizer.json by default)
+uv run python scripts/train_tokenizer.py --vocab-size 32768 --max-docs 500000
+
+# 2. Move it to the persistent volume
+cp ~/llm-training/tokenizer.json /workspace/tokenizer.json
+
+# 3. Pre-tokenize — HF cache and output go to /workspace
+uv run python scripts/pretokenize.py --tokenizer /workspace/tokenizer.json --hf-cache-dir /workspace/hf_cache --output-dir /workspace/data
+
+# 4. Train
+uv run python scripts/run_training.py --train-bin /workspace/data/train.bin --val-bin /workspace/data/val.bin --device cuda --use-muon --use-amp --use-compile --checkpoint-dir /workspace/checkpoints --plot-dir /workspace/plots
+```
+
+`--hf-cache-dir` sets `HF_HOME` before any HuggingFace import fires, so shards never
+touch the small local disk. See `README.md` for full cloud setup steps.
+
+**`torch.compile` / triton dependency notes:**
+- `triton` and `setuptools` are required for `--use-compile` on CUDA. Both are in `pyproject.toml` with Linux/x86_64 platform markers so they don't break `uv sync` on macOS.
+- `triton` has no macOS wheels — never add it without a platform marker.
+- After `uv add triton`, always run `uv sync` on the pod to actually install it.
+- If triton fails to import with `ModuleNotFoundError: No module named 'setuptools'`, run `uv add setuptools`.
+
 ---
 
 ## Pre-Training Checklist
@@ -402,9 +431,9 @@ Changes that become worthwhile at larger scale:
 - For inference-heavy use, prefer **smaller model + more tokens** over a larger compute-optimal model.
 - Do **not** train to full convergence — stop ~10% above the converged loss.
 
-**Dataset scale (measured):** `train.bin` = 11.66B tokens (23.3 GB), `val.bin` = 117.9M tokens. Total 11.78B tokens.
+**Dataset scale (measured):** `train.bin` = 9.90B tokens (19.80 GB), `val.bin` = 100.1M tokens. Total ~10.0B tokens. (Tokenized with vocab_size=32768; prior measurement of 11.78B used vocab_size=8192 — larger vocab produces fewer, longer tokens.)
 
-**Chinchilla-optimal for this dataset:** `N_optimal = 11.78B / 20 ≈ 589M non-embedding params`. The current 18.9M-param model consumed only 328M of 11.78B available tokens (2.8%). A compute-optimal next run uses `n_layers=12, d_model=2048, n_heads=32, d_ff=8192` (604M params) trained on the full dataset — approximately 12 GPU-hours on an H100.
+**Chinchilla-optimal for this dataset:** `N_optimal = 10.0B / 20 ≈ 500M non-embedding params`. The compute-optimal run uses `n_layers=12, d_model=2048, n_heads=32, d_ff=8192` (~604M params) — slightly over-parameterized for this dataset but close. Trained on the full dataset this is approximately 12 GPU-hours on an H100.
 
 ---
 

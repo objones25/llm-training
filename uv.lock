@@ -1114,6 +1114,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "tokenizers" },
     { name = "torch" },
+    { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
 [package.optional-dependencies]
@@ -1143,6 +1144,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "tokenizers", specifier = ">=0.21.0" },
     { name = "torch", specifier = ">=2.6.0,<2.7.0" },
+    { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = ">=3.0.0" },
 ]
 provides-extras = ["dev"]
 

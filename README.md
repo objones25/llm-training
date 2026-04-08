@@ -56,14 +56,15 @@ uv run python scripts/pretokenize.py --tokenizer tokenizer.json
 
 **Options:**
 
-| Flag              | Default                     | Description                                         |
-| ----------------- | --------------------------- | --------------------------------------------------- |
-| `--tokenizer`     | _(required)_                | Path to a tokenizer JSON from step 1                |
-| `--seq-len`       | `1024`                      | Fixed sequence length for each chunk                |
-| `--val-every`     | `100`                       | Route every Nth document to the val split (~1% val) |
-| `--output-dir`    | `data`                      | Directory for `train.bin` and `val.bin`             |
-| `--dataset-name`  | `HuggingFaceFW/fineweb-edu` | HuggingFace dataset name                            |
-| `--dataset-split` | `sample-10BT`               | Dataset split                                       |
+| Flag              | Default                     | Description                                                                  |
+| ----------------- | --------------------------- | ---------------------------------------------------------------------------- |
+| `--tokenizer`     | _(required)_                | Path to a tokenizer JSON from step 1                                         |
+| `--seq-len`       | `1024`                      | Fixed sequence length for each chunk                                         |
+| `--val-every`     | `100`                       | Route every Nth document to the val split (~1% val)                          |
+| `--output-dir`    | `data`                      | Directory for `train.bin` and `val.bin`                                      |
+| `--hf-cache-dir`  | _(system default)_          | Redirect HF shard cache (sets `HF_HOME`). Use on cloud pods to avoid `/root` disk-full. |
+| `--dataset-name`  | `HuggingFaceFW/fineweb-edu` | HuggingFace dataset name                                                     |
+| `--dataset-split` | `sample-10BT`               | Dataset split                                                                |
 
 **Example — custom output directory and sequence length:**
 
@@ -351,22 +352,37 @@ rsync -avz --progress data/train.bin data/val.bin user@<instance-ip>:~/llm-train
 
 ### 3. Pre-tokenize on the instance (option B — run remotely)
 
-If the instance has enough storage (≥25 GB), tokenize directly on the GPU box:
+On a cloud pod the local disk (`/root`) is typically 20–50 GB and will fill up before
+sample-10BT finishes downloading (~100 GB raw). Redirect both the HF shard cache and
+the output files to the persistent volume (`/workspace`).
 
 ```bash
-uv run python scripts/train_tokenizer.py --vocab-size 8192 --max-docs 200000
-uv run python scripts/pretokenize.py --tokenizer tokenizer.json --output-dir data
+# Train the tokenizer (output lands in ~/llm-training/tokenizer.json by default)
+uv run python scripts/train_tokenizer.py --vocab-size 32768 --max-docs 500000
+
+# Move it to the persistent volume so it survives pod restarts
+cp ~/llm-training/tokenizer.json /workspace/tokenizer.json
+
+# Pre-tokenize — redirect HF cache and output to /workspace
+uv run python scripts/pretokenize.py --tokenizer /workspace/tokenizer.json --hf-cache-dir /workspace/hf_cache --output-dir /workspace/data
 ```
+
+`--hf-cache-dir` sets `HF_HOME` before any HuggingFace import, so all downloaded shards
+land on `/workspace` instead of `/root/.cache/huggingface`.
 
 ### 4. Run training
 
 ```bash
 uv run python scripts/run_training.py \
-    --train-bin data/train.bin \
-    --val-bin data/val.bin \
+    --train-bin /workspace/data/train.bin \
+    --val-bin /workspace/data/val.bin \
     --device cuda \
     --use-muon \
-    --early-stopping-patience 10
+    --use-amp \
+    --use-compile \
+    --early-stopping-patience 10 \
+    --checkpoint-dir /workspace/checkpoints \
+    --plot-dir /workspace/plots
 ```
 
 For the full 604M run, set architecture overrides in `src/config.py` before launching:

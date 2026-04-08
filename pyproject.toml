@@ -10,6 +10,8 @@ dependencies = [
     "tokenizers>=0.21.0",
     "datasets>=3.3.0",
     "torch>=2.6.0,<2.7.0",
+    "triton>=3.0.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "setuptools; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "numpy>=2.2.0",
     "matplotlib>=3.10.0",
     "python-dotenv>=1.2.2",
