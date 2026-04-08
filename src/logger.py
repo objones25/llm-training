@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 import math
 
+import torch.nn as nn
+
 from src.config import TrainConfig
 
 _log = logging.getLogger("llm_training")
@@ -122,7 +124,7 @@ class GradientLogger:
         self,
         step: int,
         layer_norms: dict[str, float],
-        model: object,
+        model: nn.Module,
     ) -> None:
         """Emit per-layer grad and weight lines (DEBUG — file only).
 
@@ -140,7 +142,7 @@ class GradientLogger:
                 _log.debug(f"grad step={step} layer={name} norm={norm:.4f}")
 
         if step % self.cfg.weight_log_every == 0:
-            for name, p in model.named_parameters():  # type: ignore[union-attr]
+            for name, p in model.named_parameters():
                 _log.debug(
                     f"weight step={step} layer={name} norm={p.norm().item():.4f}"
                 )

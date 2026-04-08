@@ -27,6 +27,8 @@ Internal classes (not exported):
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -188,8 +190,12 @@ class CausalSelfAttention(nn.Module):
         # Apply RoPE to Q and to the new K tokens only.
         # Cached K tokens already have RoPE baked in from when they were first
         # processed; only the freshly projected K slice is rotated.
-        cos = self.rope_cos[pos_offset : pos_offset + T]  # [T, head_dim]
-        sin = self.rope_sin[pos_offset : pos_offset + T]  # [T, head_dim]
+        cos = cast(torch.Tensor, self.rope_cos)[
+            pos_offset : pos_offset + T
+        ]  # [T, head_dim]
+        sin = cast(torch.Tensor, self.rope_sin)[
+            pos_offset : pos_offset + T
+        ]  # [T, head_dim]
         q = _apply_rope(q, cos, sin)
         k = _apply_rope(k, cos, sin)
 

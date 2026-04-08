@@ -107,7 +107,7 @@ class Muon(Optimizer):
         super().__init__(params, defaults)
 
     @torch.no_grad()
-    def step(self, closure=None):  # type: ignore[override]
+    def step(self, closure=None):
         """Perform a single optimization step."""
         loss = None
         if closure is not None:

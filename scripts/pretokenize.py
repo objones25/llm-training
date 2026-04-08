@@ -12,14 +12,28 @@ documents that span the split boundary.
 
 Output
 ------
-    data/train.bin   — uint16 numpy array, shape (N_train,)
-    data/val.bin     — uint16 numpy array, shape (N_val,)
+    <output-dir>/train.bin   — uint16 numpy array, shape (N_train,)
+    <output-dir>/val.bin     — uint16 numpy array, shape (N_val,)
+
+Cloud / pod usage
+-----------------
+HuggingFace caches downloaded dataset shards to ``~/.cache/huggingface``
+by default.  On a cloud pod the local disk is small (~20-50 GB) and will
+fill up long before sample-10BT (~100 GB raw) finishes downloading.
+
+Pass ``--hf-cache-dir`` and ``--output-dir`` to redirect everything to the
+mounted persistent volume::
+
+    uv run python scripts/pretokenize.py \\
+        --tokenizer /workspace/tokenizer.json \\
+        --hf-cache-dir /workspace/hf_cache \\
+        --output-dir /workspace/data
 
 Usage::
 
     uv run python scripts/pretokenize.py --tokenizer tokenizer.json
     uv run python scripts/pretokenize.py --tokenizer tokenizer.json \\
-        --seq-len 512 --val-every 100 --num-proc 8 --output-dir data
+        --seq-len 1024 --val-every 100 --num-proc 8 --output-dir data
 """
 
 from __future__ import annotations
@@ -29,6 +43,17 @@ import os
 import struct
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+
+
+# Must be set before importing datasets/huggingface_hub so the cache
+# directory is redirected before any initialisation happens.
+def _set_hf_cache(cache_dir: str | None) -> None:
+    """Redirect the HuggingFace cache to ``cache_dir`` if given."""
+    if cache_dir:
+        p = Path(cache_dir)
+        p.mkdir(parents=True, exist_ok=True)
+        os.environ["HF_HOME"] = str(p)
+
 
 # ── Worker state (one instance per worker process) ────────────────────────────
 
@@ -106,7 +131,19 @@ def main() -> None:
         help="Documents per parallel batch submitted to the pool (default: 512)",
     )
     parser.add_argument("--output-dir", default="data")
+    parser.add_argument(
+        "--hf-cache-dir",
+        default=None,
+        help=(
+            "Override the HuggingFace cache root (sets HF_HOME). "
+            "On cloud pods point this at the mounted volume to avoid filling "
+            "the local disk with dataset shards, e.g. /workspace/hf_cache"
+        ),
+    )
     args = parser.parse_args()
+
+    # Redirect HF cache BEFORE importing datasets so the env var takes effect.
+    _set_hf_cache(args.hf_cache_dir)
 
     from datasets import load_dataset  # type: ignore[import-untyped]
 
@@ -118,7 +155,8 @@ def main() -> None:
     val_path = output_dir / "val.bin"
 
     hf_token = load_hf_token()
-    print(f"HF_TOKEN: {'set' if hf_token else 'not set (unauthenticated)'}")
+    print(f"HF_TOKEN   : {'set' if hf_token else 'not set (unauthenticated)'}")
+    print(f"HF_HOME    : {os.environ.get('HF_HOME', '~/.cache/huggingface (default)')}")
     print(
         f"Workers={args.num_proc}  batch={args.batch_size}  "
         f"seq_len={args.seq_len}  val_every={args.val_every}"

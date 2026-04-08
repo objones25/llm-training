@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -102,9 +103,9 @@ def save_checkpoint(
 
     optimizer_is_tuple = isinstance(optimizer, tuple)
     if optimizer_is_tuple:
-        optimizer_state = tuple(opt.state_dict() for opt in optimizer)
+        optimizer_state = tuple(opt.state_dict() for opt in cast(tuple, optimizer))
     else:
-        optimizer_state = optimizer.state_dict()
+        optimizer_state = cast(torch.optim.Optimizer, optimizer).state_dict()
 
     payload: dict = {
         "step": step,
@@ -183,10 +184,10 @@ def load_checkpoint(
         )
 
     if passed_is_tuple:
-        for opt, sd in zip(optimizer, ckpt["optimizer_state"]):
+        for opt, sd in zip(cast(tuple, optimizer), ckpt["optimizer_state"]):
             opt.load_state_dict(sd)
     else:
-        optimizer.load_state_dict(ckpt["optimizer_state"])
+        cast(torch.optim.Optimizer, optimizer).load_state_dict(ckpt["optimizer_state"])
 
     if scheduler is not None:
         if "scheduler_state" not in ckpt:

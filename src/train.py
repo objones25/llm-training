@@ -39,6 +39,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Iterable
 from pathlib import Path
+from typing import cast
 
 import torch
 import torch.nn.functional as F
@@ -110,7 +111,7 @@ def train(
     optimizer_result = make_optimizer(model, cfg)
     _use_muon = isinstance(optimizer_result, tuple)
 
-    if _use_muon:
+    if isinstance(optimizer_result, tuple):
         muon_opt, adamw_opt = optimizer_result
         muon_scheduler = make_scheduler(muon_opt, cfg)
         adamw_scheduler = make_scheduler(adamw_opt, cfg)
@@ -118,7 +119,7 @@ def train(
         _primary_opt = adamw_opt
         _schedulers = (muon_scheduler, adamw_scheduler)
     else:
-        optimizer = optimizer_result
+        optimizer = cast(torch.optim.AdamW, optimizer_result)
         scheduler = make_scheduler(optimizer, cfg)
         _primary_opt = optimizer
         _schedulers = None
