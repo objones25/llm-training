@@ -98,6 +98,18 @@ def main() -> None:
         default=False,
         help="Use Muon optimizer for weight matrix params; AdamW for ln+embed",
     )
+    parser.add_argument(
+        "--use-amp",
+        action="store_true",
+        default=False,
+        help="Enable automatic mixed precision (CUDA only)",
+    )
+    parser.add_argument(
+        "--use-compile",
+        action="store_true",
+        default=False,
+        help="Enable torch.compile with reduce-overhead mode (adds 30-60s cold start)",
+    )
     args = parser.parse_args()
 
     import numpy as np
@@ -124,6 +136,10 @@ def main() -> None:
         overrides["early_stopping_patience"] = args.early_stopping_patience
     if args.use_muon:
         overrides["use_muon"] = True
+    if args.use_amp:
+        overrides["use_amp"] = True
+    if args.use_compile:
+        overrides["use_compile"] = True
     cfg = TrainConfig(**overrides)
 
     # ── Pre-training summary ───────────────────────────────────────────────────
