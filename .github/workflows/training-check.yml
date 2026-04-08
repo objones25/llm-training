@@ -1,0 +1,28 @@
+name: Training Regression Check
+
+on:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  training-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run training regression check
+        run: uv run python -m pytest tests/test_training_regression.py -x --tb=short -v

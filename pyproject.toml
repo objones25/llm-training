@@ -24,9 +24,19 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[tool.mypy]
+ignore_missing_imports = true
+warn_unused_ignores = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short"
+markers = [
+    "smoke: fast model correctness checks (forward pass, loss, checkpoint)",
+    "slow: heavier tests excluded from the default suite (training regression)",
+    "unit: isolated unit tests",
+    "integration: tests that cross module boundaries",
+]
 filterwarnings = [
     # In scheduler unit tests we call scheduler.step() without optimizer.step()
     # intentionally (we only want to read the LR, not run training steps).
@@ -37,4 +47,9 @@ filterwarnings = [
 dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.1.0",
+    "ruff>=0.9.0",
+    "black>=24.0.0",
+    "mypy>=1.11.0",
+    "pip-audit>=2.7.0",
+    "bandit[toml]>=1.7.0",
 ]

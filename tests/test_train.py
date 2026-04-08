@@ -103,6 +103,7 @@ def test_train_returns_gpt(tmp_path: Path) -> None:
 # ── Smoke test (rule 18) ──────────────────────────────────────────────────────
 
 
+@pytest.mark.smoke
 def test_smoke_10_steps_loss_decreases(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

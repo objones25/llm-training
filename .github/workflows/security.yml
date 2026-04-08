@@ -1,0 +1,35 @@
+name: Security Audit
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # Weekly, Monday 09:00 UTC
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: CVE scan with pip-audit
+        run: uv run pip-audit
+
+      - name: Static security analysis with bandit
+        run: uv run bandit -r src/ -ll

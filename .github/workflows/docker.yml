@@ -1,0 +1,40 @@
+name: Docker Build
+
+on:
+  push:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t llm-training:test .
+
+      - name: Smoke test inside container
+        run: |
+          docker run --rm llm-training:test -c "
+          from src.model import GPT
+          from src.config import TrainConfig
+          import torch
+          cfg = TrainConfig(vocab_size=256, n_layers=2, d_model=64, n_heads=2, d_ff=128, seq_len=16)
+          model = GPT(cfg)
+          x = torch.zeros(1, 16, dtype=torch.long)
+          logits = model(x)
+          assert logits.shape == (1, 16, 256)
+          print('Smoke test passed: forward pass OK')
+          "

@@ -1,5 +1,9 @@
 # llm-training
 
+[![CI](https://github.com/objones25/llm-training/actions/workflows/ci.yml/badge.svg)](https://github.com/objones25/llm-training/actions/workflows/ci.yml)
+[![Model Tests](https://github.com/objones25/llm-training/actions/workflows/model-tests.yml/badge.svg)](https://github.com/objones25/llm-training/actions/workflows/model-tests.yml)
+[![Docker Build](https://github.com/objones25/llm-training/actions/workflows/docker.yml/badge.svg)](https://github.com/objones25/llm-training/actions/workflows/docker.yml)
+
 A small GPT-style language model trained on [fineweb-edu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) (sample-10BT), built incrementally for learning purposes.
 
 ## Setup
