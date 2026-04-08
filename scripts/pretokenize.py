@@ -83,8 +83,8 @@ def main() -> None:
     parser.add_argument(
         "--seq-len",
         type=int,
-        default=512,
-        help="Fixed sequence length for each chunk (default: 512)",
+        default=1024,
+        help="Fixed sequence length for each chunk (default: 1024)",
     )
     parser.add_argument(
         "--val-every",
