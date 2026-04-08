@@ -316,6 +316,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # ── Resolve checkpoint path ───────────────────────────────────────────────
+    ckpt_path: Path | None = None
     if args.checkpoint:
         ckpt_path = Path(args.checkpoint)
         if not ckpt_path.exists():
@@ -332,6 +333,7 @@ def main() -> None:
                 f"Error: no checkpoint found in '{search_dir}'."
                 "\nRun training first with:  uv run python scripts/run_training.py"
             )
+    assert ckpt_path is not None
 
     print(f"checkpoint : {ckpt_path}")
 
@@ -356,12 +358,13 @@ def main() -> None:
         )
 
     max_batches = args.val_batches if args.val_batches > 0 else None
-    _batch_stream = make_batches(_token_stream_from_bin(val_bin), cfg)
+    _batch_gen = make_batches(_token_stream_from_bin(val_bin), cfg)
     if max_batches is not None:
         import itertools
 
-        _batch_stream = itertools.islice(_batch_stream, max_batches)
-    val_batches = list(_batch_stream)
+        val_batches = list(itertools.islice(_batch_gen, max_batches))
+    else:
+        val_batches = list(_batch_gen)
 
     n_tokens = len(val_batches) * cfg.batch_size * cfg.seq_len
     print(f"val data   : {len(val_batches)} batches  ({n_tokens:,} tokens)")

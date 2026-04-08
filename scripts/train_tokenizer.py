@@ -31,7 +31,7 @@ def _text_stream(
     Imports datasets inside the function so the module is importable
     without the library being installed (e.g. in test environments).
     """
-    from datasets import load_dataset  # type: ignore[import-untyped]
+    from datasets import load_dataset
 
     dataset = load_dataset(
         dataset_name,

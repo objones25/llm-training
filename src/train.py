@@ -220,7 +220,11 @@ def train(
             ).item()
 
             # Log the matrix-group LR (Muon) — it's what 95% of the model uses.
-            current_lr = muon_opt.param_groups[0]["lr"] if _use_muon else _primary_opt.param_groups[0]["lr"]
+            current_lr = (
+                muon_opt.param_groups[0]["lr"]
+                if _use_muon
+                else _primary_opt.param_groups[0]["lr"]
+            )
             if _use_muon:
                 scaler.step(adamw_opt)
                 muon_opt.step()
@@ -250,7 +254,11 @@ def train(
             ).item()
 
             # Log the matrix-group LR (Muon) — it's what 95% of the model uses.
-            current_lr = muon_opt.param_groups[0]["lr"] if _use_muon else _primary_opt.param_groups[0]["lr"]
+            current_lr = (
+                muon_opt.param_groups[0]["lr"]
+                if _use_muon
+                else _primary_opt.param_groups[0]["lr"]
+            )
             if _use_muon:
                 muon_opt.step()
                 adamw_opt.step()

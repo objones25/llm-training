@@ -74,6 +74,7 @@ def _init_worker(tokenizer_path: str) -> None:
 
 def _tokenize_doc(text: str) -> list[int]:
     """Tokenize one document; return [BOS] + token_ids + [EOS]."""
+    assert _worker_tok is not None
     return [_worker_bos] + _worker_tok.encode(text) + [_worker_eos]
 
 
@@ -145,7 +146,7 @@ def main() -> None:
     # Redirect HF cache BEFORE importing datasets so the env var takes effect.
     _set_hf_cache(args.hf_cache_dir)
 
-    from datasets import load_dataset  # type: ignore[import-untyped]
+    from datasets import load_dataset
 
     from scripts._auth import load_hf_token
 
