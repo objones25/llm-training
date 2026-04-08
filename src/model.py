@@ -1,9 +1,10 @@
-"""GPT-style decoder-only transformer.
+"""GPT-style decoder-only transformer with RoPE positional encoding.
 
 Architecture
 ------------
-    token_embedding + position_embedding
+    token_embedding
     → N × TransformerBlock (pre-norm, causal self-attention + GELU FFN)
+      (RoPE applied to Q and K inside each attention layer)
     → RMSNorm
     → lm_head (weight-tied to token_embedding)
 
@@ -35,6 +36,66 @@ from src.config import TrainConfig
 from src.kv_cache import KVCache, LayerKVCache
 
 
+# ── RoPE helpers ──────────────────────────────────────────────────────────────
+
+
+def _precompute_rope_cos_sin(
+    head_dim: int, seq_len: int, device: torch.device
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Precompute cosine and sine tables for Rotary Position Embeddings.
+
+    Uses the standard theta_i = 1 / (10000 ^ (2i / head_dim)) formula.
+
+    Returns
+    -------
+    cos, sin : FloatTensor[seq_len, head_dim]
+        Broadcast-ready tables indexed by absolute position.
+    """
+    assert head_dim % 2 == 0, f"head_dim must be even for RoPE, got {head_dim}"
+    half = head_dim // 2
+    # Frequencies: shape [half]
+    theta = 1.0 / (10000.0 ** (torch.arange(0, half, device=device).float() / half))
+    # Positions: shape [seq_len]
+    positions = torch.arange(seq_len, device=device).float()
+    # Outer product → [seq_len, half]
+    freqs = torch.outer(positions, theta)
+    # Duplicate each frequency for both sin/cos halves → [seq_len, head_dim]
+    freqs = torch.cat([freqs, freqs], dim=-1)
+    return freqs.cos(), freqs.sin()
+
+
+def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+    """Rotate the second half of the last dimension by negating the first half.
+
+    For a vector split into [a, b], returns [-b, a].
+    """
+    half = x.shape[-1] // 2
+    x1 = x[..., :half]
+    x2 = x[..., half:]
+    return torch.cat([-x2, x1], dim=-1)
+
+
+def _apply_rope(
+    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> torch.Tensor:
+    """Apply rotary embeddings to query or key tensors.
+
+    Parameters
+    ----------
+    x   : FloatTensor[B, n_heads, T, head_dim]
+    cos : FloatTensor[T, head_dim]  (slice for the relevant positions)
+    sin : FloatTensor[T, head_dim]
+
+    Returns
+    -------
+    FloatTensor[B, n_heads, T, head_dim]
+    """
+    # Broadcast cos/sin over batch and head dimensions
+    cos = cos.unsqueeze(0).unsqueeze(0)  # [1, 1, T, head_dim]
+    sin = sin.unsqueeze(0).unsqueeze(0)
+    return x * cos + _rotate_half(x) * sin
+
+
 # ── RMSNorm ───────────────────────────────────────────────────────────────────
 
 
@@ -62,10 +123,12 @@ class RMSNorm(nn.Module):
 
 
 class CausalSelfAttention(nn.Module):
-    """Multi-head causal self-attention.
+    """Multi-head causal self-attention with Rotary Position Embeddings (RoPE).
 
-    Uses a combined QKV projection for efficiency. The causal mask is
-    registered as a buffer so it moves to the correct device automatically.
+    Uses a combined QKV projection for efficiency. RoPE is applied to Q and K
+    before attention, replacing learned absolute position embeddings. Cosine
+    and sine buffers are precomputed at init and registered so they move to
+    the correct device automatically.
 
     Parameters
     ----------
@@ -85,8 +148,13 @@ class CausalSelfAttention(nn.Module):
         self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model, bias=False)
         self.out_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
 
-        # No mask buffer needed: F.scaled_dot_product_attention handles the
-        # causal mask internally when is_causal=True.
+        # Precompute RoPE tables once; register as buffers so they follow the
+        # module to the correct device via .to() / .cuda() / etc.
+        cos, sin = _precompute_rope_cos_sin(
+            self.head_dim, cfg.seq_len, device=torch.device("cpu")
+        )
+        self.register_buffer("rope_cos", cos)  # [seq_len, head_dim]
+        self.register_buffer("rope_sin", sin)  # [seq_len, head_dim]
 
     def forward(
         self,
@@ -117,8 +185,20 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
 
+        # Determine position offset for RoPE.
+        # Read cache length BEFORE extending — new tokens start at pos_offset.
+        pos_offset = layer_cache.k.shape[2] if layer_cache is not None else 0
+
+        # Apply RoPE to Q and to the new K tokens only.
+        # Cached K tokens already have RoPE baked in from when they were first
+        # processed; only the freshly projected K slice is rotated.
+        cos = self.rope_cos[pos_offset : pos_offset + T]  # [T, head_dim]
+        sin = self.rope_sin[pos_offset : pos_offset + T]  # [T, head_dim]
+        q = _apply_rope(q, cos, sin)
+        k = _apply_rope(k, cos, sin)
+
         if layer_cache is not None:
-            # Extend the cache with the new K/V tensors.
+            # Extend the cache with the RoPE-encoded new K/V tensors.
             k = torch.cat([layer_cache.k, k], dim=2)  # (B, n_heads, T_cached+T, head_dim)
             v = torch.cat([layer_cache.v, v], dim=2)
             layer_cache.k = k
@@ -211,7 +291,7 @@ class TransformerBlock(nn.Module):
 
 
 class GPT(nn.Module):
-    """Decoder-only GPT transformer.
+    """Decoder-only GPT transformer with RoPE positional encoding.
 
     Input
     -----
@@ -226,17 +306,16 @@ class GPT(nn.Module):
     - ``lm_head.weight`` is tied to ``token_embedding.weight`` (GPT-2 style).
       Because of this, ``named_parameters()`` deduplicates the tied tensor and
       only yields it under ``"token_embedding.weight"``.
-    - Embedding modules are named with ``"embedding"`` in their attribute name
-      so the CONTRIBUTING.md guard correctly excludes them from N:
-          ``n_params = sum(p.numel() for name, p in model.named_parameters()
-                           if "embedding" not in name)``
+    - Positional information is injected via RoPE inside each attention layer;
+      there is no separate ``position_embedding`` module.
+    - The ``"embedding"`` name filter used for n_params correctly excludes only
+      ``token_embedding.weight`` (and lm_head, which is tied to it).
     """
 
     def __init__(self, cfg: TrainConfig) -> None:
         super().__init__()
         self._n_layers = cfg.n_layers
         self.token_embedding = nn.Embedding(cfg.vocab_size, cfg.d_model)
-        self.position_embedding = nn.Embedding(cfg.seq_len, cfg.d_model)
         self.blocks = nn.ModuleList(
             [TransformerBlock(cfg) for _ in range(cfg.n_layers)]
         )
@@ -262,8 +341,7 @@ class GPT(nn.Module):
 
         # Store non-embedding parameter count as an attribute.
         # The "embedding" filter correctly excludes token_embedding.weight
-        # (yielded under that name) and position_embedding.weight.
-        # lm_head.weight is the same tensor — deduplicated, not double-counted.
+        # (yielded under that name); lm_head.weight is tied — not double-counted.
         # Surfaced by train.py so the model itself does not print.
         self.n_params: int = sum(
             p.numel()
@@ -299,20 +377,18 @@ class GPT(nn.Module):
             Token IDs.  T must be ≤ cfg.seq_len.  During cached generation
             this is typically a single token (T == 1).
         kv_cache : KVCache or None
-            When provided, positions are offset by the current cache length so
-            new tokens receive the correct positional embeddings.  The cache is
-            updated in place at each attention layer.  Pass None during
-            training (no overhead, identical behavior).
+            When provided, RoPE position offsets inside each attention layer
+            are computed from the current cache length automatically.  The
+            cache is updated in place at each attention layer.  Pass None
+            during training (no overhead, identical behavior).
 
         Returns
         -------
         logits : FloatTensor[B, T, vocab_size]
         """
         B, T = idx.shape
-        pos_offset = kv_cache.seq_len if kv_cache is not None else 0
-        positions = torch.arange(pos_offset, pos_offset + T, device=idx.device)
 
-        x = self.token_embedding(idx) + self.position_embedding(positions)
+        x = self.token_embedding(idx)
         for i, block in enumerate(self.blocks):
             layer_cache = kv_cache.layers[i] if kv_cache is not None else None
             x = block(x, layer_cache=layer_cache)

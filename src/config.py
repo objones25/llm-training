@@ -15,7 +15,7 @@ class TrainConfig:
     # Training
     max_steps: int = 700_000
     batch_size: int = 32
-    seq_len: int = 512
+    seq_len: int = 1024
     learning_rate: float = 2e-4
     warmup_steps: int = 7_000
     weight_decay: float = 0.1

@@ -66,7 +66,7 @@ def test_loss_monotonically_decreasing(cfg: TrainConfig) -> None:
     """Loss must decrease over 3 gradient steps on a fixed synthetic batch (rule 6)."""
     torch.manual_seed(42)
     m = GPT(cfg)
-    optimizer = torch.optim.Adam(m.parameters(), lr=1e-2)
+    optimizer = torch.optim.Adam(m.parameters(), lr=3e-3)
     idx = torch.randint(0, cfg.vocab_size, (2, cfg.seq_len))
     targets = torch.randint(0, cfg.vocab_size, (2, cfg.seq_len))
 

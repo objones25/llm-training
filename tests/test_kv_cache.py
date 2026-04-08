@@ -158,8 +158,9 @@ def test_position_offset_applied():
 
     We verify indirectly: the logits from a single-token forward with an
     empty cache (pos=0) must differ from those with a populated cache
-    (pos=T_seed).  If the offset were ignored, they would be identical
-    (same token, same position embedding → same output).
+    (pos=T_seed).  If the RoPE offset were ignored, Q and K would receive
+    the same rotations at position 0 regardless of cache length, producing
+    identical attention patterns and identical outputs.
     """
     torch.manual_seed(2)
     cfg = _tiny_cfg()
@@ -184,7 +185,7 @@ def test_position_offset_applied():
         model(seed, kv_cache=cache)
         logits_posN = model(single, kv_cache=cache)  # [1, 1, vocab]
 
-    # Outputs must differ because position embeddings differ.
+    # Outputs must differ because RoPE rotations depend on absolute position.
     assert not torch.allclose(logits_pos0, logits_posN), (
         "Logits should differ when position offset changes"
     )
