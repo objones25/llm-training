@@ -39,10 +39,17 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import atexit
 import os
+import signal
 import struct
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+
+# SIGTERM (e.g. `kill <pid>` or `pkill`) does not trigger atexit by default.
+# Converting it to SystemExit lets atexit handlers run and cleans up workers.
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
 
 # Must be set before importing datasets/huggingface_hub so the cache
@@ -186,6 +193,7 @@ def main() -> None:
             initargs=(args.tokenizer,),
         ) as executor,
     ):
+        atexit.register(executor.shutdown, wait=False, cancel_futures=True)
         train_buf: list[int] = []
         val_buf: list[int] = []
         batch: list[str] = []
