@@ -2,9 +2,9 @@
 
 Separates model parameters into three groups:
 
-    ln group      — LayerNorm parameters (identified by module type).
+    ln group      — RMSNorm parameters (identified by module type).
                     LR = base_lr × cfg.ln_lr_mult.  Weight decay = 0.
-                    LN gradients are bounded by construction (normalization caps
+                    Norm gradients are bounded by construction (normalization caps
                     the signal), so the small-gradient mode in the distribution
                     is structural.  A higher LR compensates for the smaller
                     effective gradient magnitude.
@@ -24,8 +24,8 @@ use AdamW.  The function then returns a ``(Muon, AdamW)`` tuple.
 When ``cfg.use_muon`` is False (default), a single AdamW optimizer is returned
 with all three param groups.
 
-LayerNorm parameters are identified by inspecting module types (not by name
-substring matching) because the GPT model names its LayerNorm modules as
+RMSNorm parameters are identified by inspecting module types (not by name
+substring matching) because the GPT model names its RMSNorm modules as
 ``ln_1``, ``ln_2``, and ``ln_f`` — none of which contain "norm".
 
 Public API
@@ -41,6 +41,7 @@ import torch.nn as nn
 import torch.optim
 
 from src.config import TrainConfig
+from src.model import RMSNorm
 from src.muon import Muon
 
 
@@ -68,12 +69,12 @@ def make_optimizer(
         When ``cfg.use_muon`` is True: ``(muon_opt, adamw_opt)`` where
         ``muon_opt`` holds the matrix group and ``adamw_opt`` holds ln+embed.
     """
-    # Collect LayerNorm parameter IDs via type inspection.
-    # Name-based substring matching ("norm") would miss the GPT model's
+    # Collect RMSNorm parameter IDs via type inspection.
+    # Name-based substring matching would miss the GPT model's
     # ln_1/ln_2/ln_f naming convention.
     ln_ids: set[int] = set()
     for module in model.modules():
-        if isinstance(module, nn.LayerNorm):
+        if isinstance(module, RMSNorm):
             for param in module.parameters():
                 ln_ids.add(id(param))
 

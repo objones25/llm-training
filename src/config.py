@@ -6,7 +6,7 @@ from dataclasses import dataclass
 @dataclass
 class TrainConfig:
     # Model
-    vocab_size: int = 8192
+    vocab_size: int = 32_768
     n_layers: int = 12
     d_model: int = 2048
     n_heads: int = 32

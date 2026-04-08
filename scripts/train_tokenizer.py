@@ -56,10 +56,10 @@ def main() -> None:
     parser.add_argument(
         "--max-docs",
         type=int,
-        default=200_000,
+        default=500_000,
         help="Number of documents to stream for training (default: 200k)",
     )
-    parser.add_argument("--vocab-size", type=int, default=8192)
+    parser.add_argument("--vocab-size", type=int, default=32_768)
     parser.add_argument("--output", default="tokenizer.json")
     args = parser.parse_args()
 

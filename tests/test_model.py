@@ -125,10 +125,10 @@ def test_non_embedding_param_count_value(cfg: TrainConfig) -> None:
         out_proj: d_model^2
         fc1:      d_model * d_ff
         fc2:      d_ff * d_model
-        ln_1:     d_model (weight) + d_model (bias)
-        ln_2:     d_model (weight) + d_model (bias)
+        ln_1:     d_model (weight only — RMSNorm has no bias)
+        ln_2:     d_model (weight only — RMSNorm has no bias)
 
-    Plus final LayerNorm ln_f: d_model (weight) + d_model (bias).
+    Plus final RMSNorm ln_f: d_model (weight only).
     lm_head.weight is weight-tied — not double-counted.
     """
     torch.manual_seed(4)
@@ -138,8 +138,8 @@ def test_non_embedding_param_count_value(cfg: TrainConfig) -> None:
         3 * cfg.d_model ** 2          # qkv
         + cfg.d_model ** 2            # out_proj
         + 2 * cfg.d_model * cfg.d_ff  # fc1 + fc2
-        + 4 * cfg.d_model             # ln_1 weight+bias, ln_2 weight+bias
-    ) + 2 * cfg.d_model               # ln_f weight+bias
+        + 2 * cfg.d_model             # ln_1 weight, ln_2 weight (no bias)
+    ) + cfg.d_model                   # ln_f weight (no bias)
 
     assert model.n_params == expected, (
         f"Expected {expected:,} non-embedding params, got {model.n_params:,}"

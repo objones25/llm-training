@@ -51,7 +51,7 @@ All hyperparameters must be defined in `src/config.py` as a dataclass. Nothing i
 @dataclass
 class TrainConfig:
     # Model
-    vocab_size: int = 8192
+    vocab_size: int = 32_768
     n_layers: int = 12
     d_model: int = 2048
     n_heads: int = 32
@@ -69,7 +69,7 @@ class TrainConfig:
     # Optimizer
     adamw_betas: tuple[float, float] = (0.9, 0.999)
     adamw_eps: float = 1e-8
-    ln_lr_mult: float = 3.0      # LR multiplier for LayerNorm params (no weight decay)
+    ln_lr_mult: float = 3.0      # LR multiplier for RMSNorm params (no weight decay)
     embed_lr_mult: float = 0.1   # LR multiplier for embedding params (no weight decay)
     use_muon: bool = False       # Use Muon optimizer for matrix params; AdamW for ln+embed
 
@@ -343,14 +343,13 @@ each test gets written.
 
 ### Architectural philosophy
 
-**Prefer standard defaults over novelty.** This project uses GPT-2 style conventions — learned absolute positional embeddings, LayerNorm, standard GELU FF blocks — because they are well-understood, well-tested, and sufficient at the current scale (`seq_len=512`, ~600M parameters). The added complexity of RoPE, RMSNorm, SwiGLU, or DDP is not justified until the model is scaled up.
+**Prefer standard defaults over novelty.** This project uses GPT-2 style conventions — learned absolute positional embeddings, RMSNorm, standard GELU FF blocks — because they are well-understood, well-tested, and sufficient at the current scale (`seq_len=512`, ~600M parameters). The added complexity of RoPE, SwiGLU, or DDP is not justified until the model is scaled up.
 
 Before adopting any architectural change, ask: does this provide a measurable benefit at the target `N` and `D`? If the answer is "only at larger scale", defer it. Keep the implementation surface small and the diagnostics interpretable.
 
 Changes that become worthwhile at larger scale:
 
 - **RoPE** — when `seq_len > 512` or generalization beyond trained length is needed
-- **RMSNorm** — drop-in LayerNorm replacement; marginal benefit, low cost, worth adding at the next major rewrite
 - **SwiGLU** — outperforms GELU at the same parameter count; worthwhile for any serious scaled run
 - **DDP** — required to use more than one GPU; adds significant implementation surface
 
@@ -369,15 +368,15 @@ Changes that become worthwhile at larger scale:
 - Use **AdamW**, not Adam. AdamW trains worse for most of the run but ends better.
   Decoupled weight decay matters especially at scale.
 - `optimizer.py` splits parameters into **three explicit groups**:
-  - **ln group** — LayerNorm parameters (identified by module type, not name).
+  - **ln group** — RMSNorm parameters (identified by module type, not name).
     `lr = learning_rate × ln_lr_mult` (default 3×). No weight decay.
-    Rationale: LN gradients are bounded by construction (~10⁻²); higher LR compensates.
+    Rationale: norm gradients are bounded by construction (~10⁻²); higher LR compensates.
   - **embed group** — Embedding parameters (token + position).
     `lr = learning_rate × embed_lr_mult` (default 0.1×). No weight decay.
   - **matrix group** — All remaining weight matrices (QKV, out_proj, FF, lm_head).
     `lr = learning_rate`. Weight decay = `cfg.weight_decay`.
-- Do **not** apply weight decay to biases or LayerNorm parameters.
-- LN params are identified by `isinstance(module, nn.LayerNorm)` — name-based matching
+- Do **not** apply weight decay to RMSNorm parameters.
+- LN params are identified by `isinstance(module, RMSNorm)` — name-based matching
   would miss `ln_1`/`ln_2`/`ln_f` naming used in this model.
 - When `cfg.use_muon=True`, the **matrix group** uses the **Muon optimizer** (`src/muon.py`)
   and the ln+embed groups use AdamW. `make_optimizer` returns a `(Muon, AdamW)` tuple.

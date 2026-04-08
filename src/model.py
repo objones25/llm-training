@@ -4,7 +4,7 @@ Architecture
 ------------
     token_embedding + position_embedding
     → N × TransformerBlock (pre-norm, causal self-attention + GELU FFN)
-    → LayerNorm
+    → RMSNorm
     → lm_head (weight-tied to token_embedding)
 
 Public API
@@ -18,6 +18,7 @@ Public API
         logits = model(next_token,  kv_cache=cache)   # generate (repeated)
 
 Internal classes (not exported):
+    RMSNorm
     CausalSelfAttention
     FeedForward
     TransformerBlock
@@ -32,6 +33,29 @@ import torch.nn.functional as F
 
 from src.config import TrainConfig
 from src.kv_cache import KVCache, LayerKVCache
+
+
+# ── RMSNorm ───────────────────────────────────────────────────────────────────
+
+
+class RMSNorm(nn.Module):
+    """Root Mean Square Layer Normalization.
+
+    Drop-in replacement for LayerNorm that omits mean subtraction and the
+    bias term, keeping only the learnable scale (gamma).  Slightly faster than
+    LayerNorm and equivalent in practice for transformer pre-norm use.
+
+    Reference: Zhang & Sennrich, 2019 — "Root Mean Square Layer Normalization"
+    """
+
+    def __init__(self, d_model: int, eps: float = 1e-6) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(d_model))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        rms = x.pow(2).mean(dim=-1, keepdim=True).add(self.eps).sqrt()
+        return (x / rms) * self.weight
 
 
 # ── Attention ─────────────────────────────────────────────────────────────────
@@ -147,8 +171,8 @@ class FeedForward(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    """Pre-norm transformer block: LayerNorm → Attention → residual,
-    then LayerNorm → FFN → residual.
+    """Pre-norm transformer block: RMSNorm → Attention → residual,
+    then RMSNorm → FFN → residual.
 
     Pre-norm (applied before the sublayer rather than after) is standard in
     GPT-2 and later models. It improves gradient flow depth without needing
@@ -157,9 +181,9 @@ class TransformerBlock(nn.Module):
 
     def __init__(self, cfg: TrainConfig) -> None:
         super().__init__()
-        self.ln_1 = nn.LayerNorm(cfg.d_model)
+        self.ln_1 = RMSNorm(cfg.d_model)
         self.attn = CausalSelfAttention(cfg)
-        self.ln_2 = nn.LayerNorm(cfg.d_model)
+        self.ln_2 = RMSNorm(cfg.d_model)
         self.ff = FeedForward(cfg)
 
     def forward(
@@ -216,7 +240,7 @@ class GPT(nn.Module):
         self.blocks = nn.ModuleList(
             [TransformerBlock(cfg) for _ in range(cfg.n_layers)]
         )
-        self.ln_f = nn.LayerNorm(cfg.d_model)
+        self.ln_f = RMSNorm(cfg.d_model)
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
 
         # Weight tying: share token embedding weights with the output projection.

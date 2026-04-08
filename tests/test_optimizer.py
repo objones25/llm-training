@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.config import TrainConfig
-from src.model import GPT
+from src.model import GPT, RMSNorm
 from src.optimizer import make_optimizer
 
 
@@ -85,13 +85,13 @@ def test_matrix_group_uses_base_lr(model: GPT, cfg: TrainConfig) -> None:
 
 
 def test_ln_group_uses_multiplied_lr(model: GPT, cfg: TrainConfig) -> None:
-    """The LayerNorm group LR must be base_lr × ln_lr_mult."""
+    """The RMSNorm group LR must be base_lr × ln_lr_mult."""
     opt = make_optimizer(model, cfg)
-    # The ln group contains LayerNorm weight/bias — identify it by checking
-    # that one of its params belongs to a LayerNorm module.
+    # The ln group contains RMSNorm weight — identify it by checking
+    # that one of its params belongs to an RMSNorm module.
     ln_param_ids: set[int] = set()
     for module in model.modules():
-        if isinstance(module, nn.LayerNorm):
+        if isinstance(module, RMSNorm):
             for p in module.parameters():
                 ln_param_ids.add(id(p))
 
@@ -119,7 +119,7 @@ def test_embed_group_uses_multiplied_lr(model: GPT, cfg: TrainConfig) -> None:
 
 
 def test_layernorm_params_in_no_decay_group(model: GPT, cfg: TrainConfig) -> None:
-    """Every parameter belonging to a LayerNorm module must be in a no-decay group."""
+    """Every parameter belonging to an RMSNorm module must be in a no-decay group."""
     opt = make_optimizer(model, cfg)
     no_decay_ids = {
         id(p)
@@ -128,10 +128,10 @@ def test_layernorm_params_in_no_decay_group(model: GPT, cfg: TrainConfig) -> Non
         for p in g["params"]
     }
     for module in model.modules():
-        if isinstance(module, nn.LayerNorm):
+        if isinstance(module, RMSNorm):
             for param in module.parameters():
                 assert id(param) in no_decay_ids, (
-                    "LayerNorm parameter not found in a no-decay group"
+                    "RMSNorm parameter not found in a no-decay group"
                 )
 
 
@@ -164,7 +164,7 @@ def test_embedding_params_not_in_matrix_group(model: GPT, cfg: TrainConfig) -> N
 
 
 def test_weight_matrix_params_in_decay_group(model: GPT, cfg: TrainConfig) -> None:
-    """Non-embedding, non-LayerNorm weight matrices must be in the decay group."""
+    """Non-embedding, non-RMSNorm weight matrices must be in the decay group."""
     opt = make_optimizer(model, cfg)
     decay_ids = {
         id(p)
@@ -174,7 +174,7 @@ def test_weight_matrix_params_in_decay_group(model: GPT, cfg: TrainConfig) -> No
     }
     ln_ids: set[int] = set()
     for module in model.modules():
-        if isinstance(module, nn.LayerNorm):
+        if isinstance(module, RMSNorm):
             for param in module.parameters():
                 ln_ids.add(id(param))
 
@@ -339,13 +339,13 @@ def test_muon_group_contains_only_matrix_params(
 
     ln_ids: set[int] = set()
     for module in model.modules():
-        if isinstance(module, nn.LayerNorm):
+        if isinstance(module, RMSNorm):
             for p in module.parameters():
                 ln_ids.add(id(p))
     embed_ids = {id(p) for n, p in model.named_parameters() if "embedding" in n}
 
     for pid in muon_ids:
-        assert pid not in ln_ids, "Muon group contains a LayerNorm param"
+        assert pid not in ln_ids, "Muon group contains an RMSNorm param"
         assert pid not in embed_ids, "Muon group contains an embedding param"
 
 
@@ -373,13 +373,13 @@ def test_adamw_group_has_ln_and_embed_when_use_muon_true(
 
     ln_ids: set[int] = set()
     for module in model.modules():
-        if isinstance(module, nn.LayerNorm):
+        if isinstance(module, RMSNorm):
             for p in module.parameters():
                 ln_ids.add(id(p))
     embed_ids = {id(p) for n, p in model.named_parameters() if "embedding" in n}
 
     for pid in ln_ids:
-        assert pid in adamw_ids, "AdamW is missing a LayerNorm param"
+        assert pid in adamw_ids, "AdamW is missing an RMSNorm param"
     for pid in embed_ids:
         assert pid in adamw_ids, "AdamW is missing an embedding param"
 
