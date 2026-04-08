@@ -1,3 +1,5 @@
+> **[ARCHIVED — from 6-layer experiment (d_model=512, n_heads=8, vocab=8192), superseded by 604M run (d_model=2048, n_heads=32, vocab=32768)]**
+
 # Training Run Analysis — 20,000 Steps (Final)
 
 **Checkpoint:** `checkpoints/checkpoint_0020000.pt`

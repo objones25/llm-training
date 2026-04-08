@@ -26,13 +26,14 @@ uv run python scripts/train_tokenizer.py
 
 **Options:**
 
-| Flag              | Default                     | Description                                |
-| ----------------- | --------------------------- | ------------------------------------------ |
-| `--vocab-size`    | `8192`                      | Target vocabulary size                     |
-| `--max-docs`      | `200000`                    | Number of documents to stream for training |
-| `--output`        | `tokenizer.json`            | Output path for the saved tokenizer        |
-| `--dataset-name`  | `HuggingFaceFW/fineweb-edu` | HuggingFace dataset name                   |
-| `--dataset-split` | `sample-10BT`               | Dataset split                              |
+| Flag               | Default                     | Description                                |
+| ------------------ | --------------------------- | ------------------------------------------ |
+| `--vocab-size`     | `32768`                     | Target vocabulary size                     |
+| `--max-docs`       | `500000`                    | Number of documents to stream for training |
+| `--output`         | `tokenizer.json`            | Output path for the saved tokenizer        |
+| `--dataset-name`   | `HuggingFaceFW/fineweb-edu` | HuggingFace dataset name                   |
+| `--dataset-config` | `sample-10BT`               | Dataset config/subset name                 |
+| `--dataset-split`  | `train`                     | Split within the dataset config            |
 
 **Example — smaller vocab for a quick experiment:**
 

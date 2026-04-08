@@ -35,11 +35,12 @@ previous one pass.
 6.  dataloader.py     — batching, padding, vocab bounds checks
 7.  scheduler.py      — cosine LR with warmup, schedule length contract
 8.  optimizer.py      — AdamW with correct weight decay grouping
-9.  checkpoint.py     — save/load model + optimizer, logit identity check
-10. logger.py         — GradientLogger, per-step and per-layer output contracts
-11. plots.py          — all matplotlib plots, file output contracts
-12. train.py          — training loop, logging contract, nan detection
-13. smoke test        — full mini loop: 10 steps, 2-layer, synthetic data
+9.  muon.py           — Muon optimizer with Newton-Schulz orthogonalization
+10. checkpoint.py     — save/load model + optimizer, logit identity check
+11. logger.py         — GradientLogger, per-step and per-layer output contracts
+12. plots.py          — all matplotlib plots, file output contracts
+13. train.py          — training loop, logging contract, nan detection
+14. smoke test        — full mini loop: 10 steps, 2-layer, synthetic data
 ```
 
 The rationale: each layer depends on the one above it. A bug in `model.py` caught before
@@ -164,18 +165,27 @@ if cosine_steps != max_steps:
 
 ### `optimizer.py` — weight decay grouping
 
-Weight decay must never be applied to biases or LayerNorm parameters. Implemented as
-explicit parameter groups, not by setting `weight_decay=0` globally:
+Weight decay must never be applied to RMSNorm or embedding parameters. Implemented as
+three explicit parameter groups identified by **module type** (not name substring):
 
 ```python
-decay_params = [
-    p for n, p in model.named_parameters()
-    if p.requires_grad and not any(nd in n for nd in ["bias", "norm"])
-]
-no_decay_params = [
-    p for n, p in model.named_parameters()
-    if p.requires_grad and any(nd in n for nd in ["bias", "norm"])
-]
+# RMSNorm params — identified by type, not name.
+# The GPT model names these ln_1/ln_2/ln_f — none contain "norm".
+ln_ids: set[int] = set()
+for module in model.modules():
+    if isinstance(module, RMSNorm):
+        for param in module.parameters():
+            ln_ids.add(id(param))
+
+# Embedding params — identified by name substring.
+embed_ids: set[int] = set()
+for name, param in model.named_parameters():
+    if "embedding" in name:
+        embed_ids.add(id(param))
+
+# ln: lr × ln_lr_mult, no weight decay
+# embed: lr × embed_lr_mult, no weight decay
+# matrix (all others): base lr, weight_decay applied
 ```
 
 ### `plots.py` — Agg backend
@@ -241,11 +251,20 @@ a slight brightening over time as the model learns.
 
 A PR will not be merged unless:
 
-1. `pytest -x --tb=short` passes with zero failures and zero warnings.
-2. `pytest --cov=src --cov-report=term-missing` shows ≥90% line coverage for the changed module.
-3. All 26 testing rules in `CLAUDE.md` are satisfied for the new component.
-4. The Pre-Training Checklist in `CLAUDE.md` is updated if any hyperparameter defaults changed.
-5. Any new dependency is pinned in `pyproject.toml` and added to the Library Policy table in `CLAUDE.md`.
+1. `uv run black src/ scripts/ tests/` passes with no reformatting needed.
+2. `uv run ruff check src/ scripts/ tests/` passes with zero violations.
+3. `uv run mypy src/ scripts/` passes with zero errors.
+4. `pytest -x --tb=short` passes with zero failures and zero warnings.
+5. `pytest --cov=src --cov-report=term-missing` shows ≥90% line coverage for the changed module.
+6. All 28 testing rules in `CONTRIBUTING.md > Testing Rules` are satisfied for the new component.
+7. The Pre-Training Checklist in `CLAUDE.md` is updated if any hyperparameter defaults changed.
+8. Any new dependency is pinned in `pyproject.toml` and added to the Library Policy table in `CLAUDE.md`.
+
+Run the full pre-commit check in one line:
+
+```bash
+uv run black src/ scripts/ tests/ && uv run ruff check src/ scripts/ tests/ && uv run mypy src/ scripts/ && uv run python -m pytest -x --tb=short
+```
 
 ---
 
@@ -371,3 +390,38 @@ token_ids = self._tokenizer.encode(text)
 ```
 
 Assertions fail fast and give runtime visibility into precondition violations.
+
+---
+
+## Testing Rules (Non-Negotiable)
+
+All 28 rules below must be followed for every component. The component build order above determines *when* each test is written.
+
+1. Every training component has a corresponding `test_` prefixed test file.
+2. Tests run without a GPU — CPU tensors with tiny synthetic inputs only.
+3. All code is importable `.py` modules — no notebooks or interactive code.
+4. Each test is hermetic — no shared mutable state, no inter-test file dependencies.
+5. Model forward passes use minimum viable shape: `batch=2, seq_len=16, vocab=256`.
+6. Loss must be finite, non-negative, and **monotonically decreasing** over ≥3 gradient steps on a fixed synthetic batch.
+7. Dataset pipeline tests mock HuggingFace `datasets` — never hit the network in tests.
+8. Tokenizer tests assert round-trip fidelity: `decode(encode(text)) == text` for fixed strings.
+9. DataLoader tests assert no batch contains padding-only sequences and token IDs are within vocab bounds.
+10. Training step tests assert gradients are non-None, non-zero, and contain **no `nan` or `inf` values** for every named parameter after backward.
+11. Optimizer and scheduler state must be saveable/loadable with exact match on a subsequent step's loss.
+12. Checkpoint tests assert identical logits before save and after load. Scheduler state must round-trip exactly when passed to `save_checkpoint` and `load_checkpoint`.
+13. Every function with a numeric output has a test asserting output shape and dtype explicitly.
+14. Cosine schedule tests assert: LR at step 0 == warmup start, peaks at configured max, near-zero at `max_steps`.
+15. Tests touching randomness set a fixed seed **in the test body**, not in a fixture.
+16. No test may take longer than 10 seconds — mock expensive parts.
+17. Data preprocessing tests assert deterministic output given the same input and seed.
+18. A smoke test exists for a full mini training loop: 10 steps, 2-layer model, synthetic data, final loss < initial loss.
+19. Baseline CI command: `pytest -x --tb=short`.
+20. Tests write to disk only via `tmp_path` from pytest fixtures — no manual cleanup.
+21. Any function that modifies model weights (init, weight tying, parameter freezing) must have a test asserting the parameter tensor values directly — not just that a forward pass runs.
+22. A test must assert that the model in inference mode produces identical outputs on two identical inputs — catches dropout left active during inference. Set the model to inference mode with `.eval()` before the two forward passes.
+23. A test must assert that the training loop raises explicitly (not silently continues) when loss is `nan`.
+24. A test must assert that `GradientLogger.log_layers()` emits per-layer lines for every named parameter, at the correct step cadence, using a fixed synthetic model. Tests use `caplog` — not `capsys` — because output routes through the `logging` module.
+25. A test must assert that a `WARNING` line is emitted (not an exception) when any layer's gradient norm exceeds `grad_norm_warn_threshold`.
+26. Plot tests must assert that each plot function produces a valid, non-empty `.png` file at the expected path — use synthetic data passed directly to the plot function, do not run a training loop.
+27. `TrainConfig` must have a dedicated test file (`test_config.py`) with comprehensive coverage of all `__post_init__` validation rules. Each invalid config must be constructed **inside** `pytest.raises(ValueError)`, never before it.
+28. Model initialization must store the non-embedding parameter count as `model.n_params` (an attribute). Tests must assert `model.n_params` exists and is equal to the manually computed count. Do not print parameter counts in `__init__` — let `train.py` surface this value.

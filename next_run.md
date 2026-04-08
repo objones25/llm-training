@@ -1,3 +1,5 @@
+> **[ARCHIVED — planning document for the 604M run; current production config uses vocab=32768 (not 8192 as listed below)]**
+
 # Next Run: 604M Parameter Model
 
 ## Architecture
