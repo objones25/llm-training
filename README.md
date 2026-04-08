@@ -11,68 +11,16 @@ A small GPT-style language model trained on [fineweb-edu](https://huggingface.co
 A decoder-only GPT transformer with **12 layers**, **2 048-dimensional** residual stream, and **32 768-token** vocabulary — approximately 604 M non-embedding parameters at full scale.
 
 <table>
-<tr>
-<td valign="top" width="50%">
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'clusterBkg': '#dbeafe', 'clusterBorder': '#93c5fd', 'lineColor': '#6b7280'}}}%%
-flowchart TB
-    classDef io    fill:#e5e7eb,stroke:#6b7280,color:#111827
-    classDef embed fill:#fed7aa,stroke:#c2410c,color:#7c2d12,font-weight:bold
-    classDef norm  fill:#ede9fe,stroke:#7c3aed,color:#3b0764
-    classDef attn  fill:#fbcfe8,stroke:#be185d,color:#831843,font-weight:bold
-    classDef ff    fill:#fef08a,stroke:#a16207,color:#713f12
-    classDef head  fill:#bbf7d0,stroke:#15803d,color:#14532d,font-weight:bold
-
-    IN("Input Token IDs<br/>[B, T]"):::io
-    EMBED("Token Embedding<br/>vocab_size=32768 → d_model=2048"):::embed
-
-    IN --> EMBED
-
-    subgraph BLOCK["TransformerBlock x12 — pre-norm, residual at each sub-layer"]
-        direction TB
-        LN1("RMSNorm  ln_1"):::norm
-        ATTN("CausalSelfAttention<br/>32 heads · head_dim=64"):::attn
-        LN2("RMSNorm  ln_2"):::norm
-        FF("FeedForward<br/>2048 → 8192 → 2048 · GELU"):::ff
-        LN1 --> ATTN --> LN2 --> FF
-    end
-
-    EMBED --> BLOCK
-    BLOCK --> LNF("RMSNorm  ln_f"):::norm
-    LNF --> LMH("LM Head<br/>2048 → 32768<br/>weight-tied to token embedding"):::head
-    LMH --> OUT("Output Logits<br/>[B, T, 32768]"):::io
-```
-
-</td>
-<td valign="top" width="50%">
-
-**CausalSelfAttention detail**
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#6b7280'}}}%%
-flowchart TB
-    classDef io    fill:#e5e7eb,stroke:#6b7280,color:#111827
-    classDef proj  fill:#fbcfe8,stroke:#be185d,color:#831843,font-weight:bold
-    classDef rope  fill:#ede9fe,stroke:#7c3aed,color:#3b0764
-    classDef sdpa  fill:#bfdbfe,stroke:#2563eb,color:#1e3a8a,font-weight:bold
-    classDef out   fill:#bbf7d0,stroke:#15803d,color:#14532d,font-weight:bold
-
-    XIN("x  [B, T, 2048]"):::io
-    QKV("QKV Projection<br/>Linear 2048 → 6144  no bias"):::proj
-    SPLIT("Split Q, K, V<br/>each [B, T, 2048]"):::proj
-    RESHAPE("Reshape + Transpose<br/>[B, 32, T, 64]"):::proj
-    ROPE("Apply RoPE to Q and K"):::rope
-    SDPA("Scaled Dot-Product Attention<br/>softmax(QK^T / sqrt 64) times V<br/>FlashAttention-2 on CUDA"):::sdpa
-    RESHP2("Transpose + Reshape<br/>[B, T, 2048]"):::proj
-    OUTPROJ("out_proj<br/>Linear 2048 → 2048  no bias"):::out
-    XOUT("output  [B, T, 2048]"):::io
-
-    XIN --> QKV --> SPLIT --> RESHAPE --> ROPE --> SDPA --> RESHP2 --> OUTPROJ --> XOUT
-```
-
-</td>
-</tr>
+  <tbody>
+    <tr>
+      <td align="center"><b>Model Architecture</b></td>
+      <td align="center"><b>CausalSelfAttention</b></td>
+    </tr>
+    <tr>
+      <td><img src="assets/arch.svg" width="380"/></td>
+      <td><img src="assets/attention.svg" width="380"/></td>
+    </tr>
+  </tbody>
 </table>
 
 | Parameter            | Value  |
