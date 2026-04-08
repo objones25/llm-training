@@ -6,6 +6,53 @@
 
 A small GPT-style language model trained on [fineweb-edu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) (sample-10BT), built incrementally for learning purposes.
 
+## Architecture
+
+A decoder-only GPT transformer with **12 layers**, **2 048-dimensional** residual stream, and **32 768-token** vocabulary — approximately 604 M non-embedding parameters at full scale.
+
+```mermaid
+flowchart TB
+    IN["Input Token IDs<br/>[B, T]"]
+    EMBED["Token Embedding<br/>vocab_size=32768 → d_model=2048"]
+
+    IN --> EMBED
+
+    subgraph BLOCK["TransformerBlock x12 — pre-norm, residual at each sub-layer"]
+        direction TB
+        LN1["RMSNorm  ln_1"]
+        ATTN["CausalSelfAttention<br/>32 heads · head_dim=64<br/>QKV: 2048 → 6144 · out_proj: 2048 → 2048<br/>RoPE on Q and K · FlashAttention-2"]
+        LN2["RMSNorm  ln_2"]
+        FF["FeedForward<br/>2048 → 8192 → 2048 · GELU"]
+        LN1 --> ATTN --> LN2 --> FF
+    end
+
+    EMBED --> BLOCK
+    BLOCK --> LNF["RMSNorm  ln_f"]
+    LNF --> LMH["LM Head<br/>2048 → 32768<br/>weight-tied to token embedding"]
+    LMH --> OUT["Output Logits<br/>[B, T, 32768]"]
+```
+
+| Parameter            | Value  |
+| -------------------- | ------ |
+| `n_layers`           | 12     |
+| `d_model`            | 2 048  |
+| `n_heads`            | 32     |
+| `head_dim`           | 64     |
+| `d_ff`               | 8 192  |
+| `vocab_size`         | 32 768 |
+| `seq_len`            | 1 024  |
+| Non-embedding params | ~604 M |
+
+**Key design choices:**
+
+- **RoPE** — rotary position embeddings applied to Q & K inside each attention layer; no separate position embedding table. Allows length generalisation at inference.
+- **RMSNorm** — pre-norm before each sub-layer (attention and FF). Omits mean subtraction and bias; slightly faster than LayerNorm with equivalent quality.
+- **FlashAttention-2** — `scaled_dot_product_attention(is_causal=True)` dispatches to FlashAttention-2 on CUDA automatically; no custom kernel needed.
+- **Weight tying** — `lm_head.weight` is tied to `token_embedding.weight`, halving the embedding parameter count (GPT-2 style).
+- **KV cache** — two-phase (prefill + generate) inference via `src/kv_cache.py`; no architectural changes required between training and generation.
+
+---
+
 ## Setup
 
 ```bash
@@ -57,15 +104,15 @@ uv run python scripts/pretokenize.py --tokenizer tokenizer.json
 
 **Options:**
 
-| Flag              | Default                     | Description                                                                  |
-| ----------------- | --------------------------- | ---------------------------------------------------------------------------- |
-| `--tokenizer`     | _(required)_                | Path to a tokenizer JSON from step 1                                         |
-| `--seq-len`       | `1024`                      | Fixed sequence length for each chunk                                         |
-| `--val-every`     | `100`                       | Route every Nth document to the val split (~1% val)                          |
-| `--output-dir`    | `data`                      | Directory for `train.bin` and `val.bin`                                      |
+| Flag              | Default                     | Description                                                                             |
+| ----------------- | --------------------------- | --------------------------------------------------------------------------------------- |
+| `--tokenizer`     | _(required)_                | Path to a tokenizer JSON from step 1                                                    |
+| `--seq-len`       | `1024`                      | Fixed sequence length for each chunk                                                    |
+| `--val-every`     | `100`                       | Route every Nth document to the val split (~1% val)                                     |
+| `--output-dir`    | `data`                      | Directory for `train.bin` and `val.bin`                                                 |
 | `--hf-cache-dir`  | _(system default)_          | Redirect HF shard cache (sets `HF_HOME`). Use on cloud pods to avoid `/root` disk-full. |
-| `--dataset-name`  | `HuggingFaceFW/fineweb-edu` | HuggingFace dataset name                                                     |
-| `--dataset-split` | `sample-10BT`               | Dataset split                                                                |
+| `--dataset-name`  | `HuggingFaceFW/fineweb-edu` | HuggingFace dataset name                                                                |
+| `--dataset-split` | `sample-10BT`               | Dataset split                                                                           |
 
 **Example — custom output directory and sequence length:**
 
@@ -399,13 +446,13 @@ use_amp   = True   # BF16 mixed precision — roughly 2× throughput on H100
 
 **Recommended cloud flags:**
 
-| Flag / config                  | Value     | Reason                                          |
-| ------------------------------ | --------- | ----------------------------------------------- |
-| `--device cuda`                | required  | Use the GPU                                     |
-| `--use-muon`                   | enabled   | Eliminates bimodal gradient distribution        |
-| `use_amp = True`               | in config | 2× throughput via BF16 on Ampere/Hopper GPUs    |
-| `use_compile = True`           | in config | ~10–15% speedup after 60s warm-up on H100       |
-| `--early-stopping-patience 10` | 10        | Stop automatically if val loss plateaus         |
+| Flag / config                  | Value     | Reason                                       |
+| ------------------------------ | --------- | -------------------------------------------- |
+| `--device cuda`                | required  | Use the GPU                                  |
+| `--use-muon`                   | enabled   | Eliminates bimodal gradient distribution     |
+| `use_amp = True`               | in config | 2× throughput via BF16 on Ampere/Hopper GPUs |
+| `use_compile = True`           | in config | ~10–15% speedup after 60s warm-up on H100    |
+| `--early-stopping-patience 10` | 10        | Stop automatically if val loss plateaus      |
 
 ### 5. Monitor progress
 

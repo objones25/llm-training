@@ -24,3 +24,6 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# Archive
+archive/
