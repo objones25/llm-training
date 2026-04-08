@@ -2,6 +2,7 @@
 
 All tests run on CPU with a tiny synthetic optimizer — no GPU, no data.
 """
+
 from __future__ import annotations
 
 import math
@@ -12,7 +13,6 @@ import torch.optim.lr_scheduler as lr_sched
 
 from src.config import TrainConfig
 from src.scheduler import make_scheduler
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,9 @@ def _get_lr(optimizer: torch.optim.Optimizer) -> float:
     return optimizer.param_groups[0]["lr"]
 
 
-def _step_to(scheduler: lr_sched.LambdaLR, optimizer: torch.optim.Optimizer, step: int) -> float:
+def _step_to(
+    scheduler: lr_sched.LambdaLR, optimizer: torch.optim.Optimizer, step: int
+) -> float:
     """Advance scheduler to *step* and return the LR at that step."""
     for _ in range(step):
         scheduler.step()
@@ -61,7 +63,9 @@ def test_returns_lambda_lr(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -
 # ── Schedule shape contracts (CLAUDE.md rule 14) ──────────────────────────────
 
 
-def test_lr_at_step_0_is_zero(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -> None:
+def test_lr_at_step_0_is_zero(
+    optimizer: torch.optim.Optimizer, cfg: TrainConfig
+) -> None:
     """LR at step 0 must be 0 (warmup starts from 0)."""
     make_scheduler(optimizer, cfg)
     # LambdaLR initialises with last_epoch=-1 and calls step() once on
@@ -69,21 +73,27 @@ def test_lr_at_step_0_is_zero(optimizer: torch.optim.Optimizer, cfg: TrainConfig
     assert _get_lr(optimizer) == pytest.approx(0.0, abs=1e-9)
 
 
-def test_lr_peaks_at_warmup_end(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -> None:
+def test_lr_peaks_at_warmup_end(
+    optimizer: torch.optim.Optimizer, cfg: TrainConfig
+) -> None:
     """LR at step warmup_steps must equal cfg.learning_rate (the peak)."""
     scheduler = make_scheduler(optimizer, cfg)
     lr = _step_to(scheduler, optimizer, cfg.warmup_steps)
     assert lr == pytest.approx(cfg.learning_rate, rel=1e-6)
 
 
-def test_lr_near_zero_at_max_steps(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -> None:
+def test_lr_near_zero_at_max_steps(
+    optimizer: torch.optim.Optimizer, cfg: TrainConfig
+) -> None:
     """LR at step max_steps must be 0 (cos(π) = -1 → factor = 0)."""
     scheduler = make_scheduler(optimizer, cfg)
     lr = _step_to(scheduler, optimizer, cfg.max_steps)
     assert lr == pytest.approx(0.0, abs=1e-9)
 
 
-def test_warmup_is_monotone_increasing(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -> None:
+def test_warmup_is_monotone_increasing(
+    optimizer: torch.optim.Optimizer, cfg: TrainConfig
+) -> None:
     """LR must increase strictly at every step during the warmup phase."""
     scheduler = make_scheduler(optimizer, cfg)
     lrs = []
@@ -95,7 +105,9 @@ def test_warmup_is_monotone_increasing(optimizer: torch.optim.Optimizer, cfg: Tr
         assert lrs[i] > lrs[i - 1], f"LR not increasing at warmup step {i}"
 
 
-def test_cosine_is_monotone_decreasing(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -> None:
+def test_cosine_is_monotone_decreasing(
+    optimizer: torch.optim.Optimizer, cfg: TrainConfig
+) -> None:
     """LR must decrease strictly at every step after warmup ends."""
     scheduler = make_scheduler(optimizer, cfg)
     # Advance through warmup first
@@ -110,7 +122,9 @@ def test_cosine_is_monotone_decreasing(optimizer: torch.optim.Optimizer, cfg: Tr
         assert lrs[i] < lrs[i - 1], f"LR not decreasing at cosine step {i}"
 
 
-def test_mid_warmup_lr_is_proportional(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -> None:
+def test_mid_warmup_lr_is_proportional(
+    optimizer: torch.optim.Optimizer, cfg: TrainConfig
+) -> None:
     """LR at the midpoint of warmup must equal half the peak LR."""
     scheduler = make_scheduler(optimizer, cfg)
     mid = cfg.warmup_steps // 2
@@ -119,7 +133,9 @@ def test_mid_warmup_lr_is_proportional(optimizer: torch.optim.Optimizer, cfg: Tr
     assert lr == pytest.approx(expected, rel=1e-6)
 
 
-def test_mid_cosine_lr_is_half_peak(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -> None:
+def test_mid_cosine_lr_is_half_peak(
+    optimizer: torch.optim.Optimizer, cfg: TrainConfig
+) -> None:
     """LR at the cosine midpoint (halfway between warmup end and max_steps) ≈ 0.5 * peak."""
     scheduler = make_scheduler(optimizer, cfg)
     cosine_steps = cfg.max_steps - cfg.warmup_steps
@@ -143,7 +159,11 @@ def test_raises_if_warmup_equals_max_steps(cfg: TrainConfig) -> None:
         TrainConfig(
             warmup_steps=cfg.max_steps,
             max_steps=cfg.max_steps,
-            n_layers=2, d_model=64, n_heads=2, d_ff=128, vocab_size=256,
+            n_layers=2,
+            d_model=64,
+            n_heads=2,
+            d_ff=128,
+            vocab_size=256,
         )
 
 
@@ -157,14 +177,20 @@ def test_raises_if_warmup_exceeds_max_steps(cfg: TrainConfig) -> None:
         TrainConfig(
             warmup_steps=cfg.max_steps + 1,
             max_steps=cfg.max_steps,
-            n_layers=2, d_model=64, n_heads=2, d_ff=128, vocab_size=256,
+            n_layers=2,
+            d_model=64,
+            n_heads=2,
+            d_ff=128,
+            vocab_size=256,
         )
 
 
 # ── State save / load (CLAUDE.md rule 11) ─────────────────────────────────────
 
 
-def test_scheduler_state_save_load(optimizer: torch.optim.Optimizer, cfg: TrainConfig) -> None:
+def test_scheduler_state_save_load(
+    optimizer: torch.optim.Optimizer, cfg: TrainConfig
+) -> None:
     """Saving and loading state_dict must reproduce identical LR on the next step."""
     torch.manual_seed(42)
     scheduler = make_scheduler(optimizer, cfg)

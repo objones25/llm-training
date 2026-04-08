@@ -4,6 +4,7 @@ All tests pass synthetic data directly to plot functions and assert that a
 valid non-empty .png file is produced at the expected path (rule 26).
 No training loop is run. All disk writes use tmp_path.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,10 +18,9 @@ from src.plots import (
     plot_weight_norm,
 )
 
-
 # ── Synthetic data helpers ────────────────────────────────────────────────────
 
-STEPS = list(range(0, 50, 10))          # [0, 10, 20, 30, 40]
+STEPS = list(range(0, 50, 10))  # [0, 10, 20, 30, 40]
 LOSSES = [5.0, 4.2, 3.8, 3.5, 3.3]
 LRS = [0.0, 1e-4, 2e-4, 1.8e-4, 1.5e-4]
 GRAD_NORMS = [1.2, 1.0, 0.9, 0.85, 0.8]
@@ -77,7 +77,7 @@ def test_plot_loss_accepts_string_path(tmp_path: Path) -> None:
 def test_plot_loss_with_val_data(tmp_path: Path) -> None:
     """plot_loss must produce a valid .png when val_steps and val_losses are provided."""
     out = tmp_path / "loss.png"
-    val_steps = STEPS[::2]   # [0, 20, 40]
+    val_steps = STEPS[::2]  # [0, 20, 40]
     val_losses = [5.1, 3.9, 3.4]
     plot_loss(STEPS, LOSSES, out, val_steps=val_steps, val_losses=val_losses)
     _assert_valid_png(out)
@@ -153,7 +153,9 @@ def test_plot_grad_heatmap_single_step(tmp_path: Path) -> None:
 def test_plot_grad_heatmap_single_layer(tmp_path: Path) -> None:
     """plot_grad_heatmap must not crash with only one layer."""
     out = tmp_path / "grad_heatmap.png"
-    plot_grad_heatmap(STEPS, ["block.0.attn"], [[v] for v in [0.5, 0.4, 0.3, 0.25, 0.2]], out)
+    plot_grad_heatmap(
+        STEPS, ["block.0.attn"], [[v] for v in [0.5, 0.4, 0.3, 0.25, 0.2]], out
+    )
     _assert_valid_png(out)
 
 

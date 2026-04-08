@@ -22,6 +22,7 @@ Public API
         cfg: TrainConfig,
     ) -> torch.optim.lr_scheduler.LambdaLR
 """
+
 from __future__ import annotations
 
 import math

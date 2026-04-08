@@ -33,6 +33,7 @@ Public API
         val_token_stream: Iterable[int] | None = None,
     ) -> GPT
 """
+
 from __future__ import annotations
 
 import warnings
@@ -138,11 +139,7 @@ def train(
 
         _tokenizer = BPETokenizer.load("tokenizer.model")
         _docs = stream_documents(cfg)
-        token_stream = (
-            tok_id
-            for doc in _docs
-            for tok_id in _tokenizer.encode(doc)
-        )
+        token_stream = (tok_id for doc in _docs for tok_id in _tokenizer.encode(doc))
 
     batches = make_batches(token_stream, cfg)
 
@@ -199,9 +196,7 @@ def train(
                 )
 
             if not torch.isfinite(loss):
-                raise RuntimeError(
-                    f"Loss is {loss.item()} at step {step}. Aborting."
-                )
+                raise RuntimeError(f"Loss is {loss.item()} at step {step}. Aborting.")
 
             scaler.scale(loss).backward()
 
@@ -234,9 +229,7 @@ def train(
             )
 
             if not torch.isfinite(loss):
-                raise RuntimeError(
-                    f"Loss is {loss.item()} at step {step}. Aborting."
-                )
+                raise RuntimeError(f"Loss is {loss.item()} at step {step}. Aborting.")
 
             loss.backward()
 
@@ -300,8 +293,7 @@ def train(
 
         if step % cfg.weight_log_every == 0:
             weight_norms_dict: dict[str, float] = {
-                name: p.norm().item()
-                for name, p in model.named_parameters()
+                name: p.norm().item() for name, p in model.named_parameters()
             }
             if layer_names is None:
                 layer_names = list(weight_norms_dict.keys())
@@ -311,11 +303,7 @@ def train(
             )
 
         # ── Validation loss ───────────────────────────────────────────────────
-        if (
-            _val_batches
-            and cfg.val_every > 0
-            and step % cfg.val_every == 0
-        ):
+        if _val_batches and cfg.val_every > 0 and step % cfg.val_every == 0:
             with torch.no_grad():
                 model.eval()
                 val_loss_total = 0.0
@@ -361,7 +349,9 @@ def train(
         # ── Save / overwrite plots ─────────────────────────────────────────────
         if step % cfg.plot_every == 0:
             plot_loss(
-                steps_list, losses_list, plot_dir / "loss.png",
+                steps_list,
+                losses_list,
+                plot_dir / "loss.png",
                 val_steps=val_steps_list or None,
                 val_losses=val_losses_list or None,
             )

@@ -21,9 +21,11 @@ Public API
 All ``path`` arguments accept ``str`` or ``pathlib.Path``.
 ``norms_matrix`` is a 2-D sequence of shape ``(len(steps), len(layer_names))``.
 """
+
 from __future__ import annotations
 
 import matplotlib
+
 matplotlib.use("Agg")  # must precede all other matplotlib imports
 
 import matplotlib.pyplot as plt  # noqa: E402
@@ -154,7 +156,9 @@ def plot_grad_heatmap(
     mat = np.array(norms_matrix, dtype=float).T  # (layers, steps)
     mat = np.clip(mat, 1e-10, None)
 
-    fig, ax = plt.subplots(figsize=(max(4, len(steps) * 0.4 + 2), max(3, len(layer_names) * 0.3 + 1)))
+    fig, ax = plt.subplots(
+        figsize=(max(4, len(steps) * 0.4 + 2), max(3, len(layer_names) * 0.3 + 1))
+    )
     im = ax.imshow(mat, aspect="auto", norm=LogNorm(vmin=mat.min(), vmax=mat.max()))
     ax.set_xticks(range(len(steps)))
     ax.set_xticklabels(steps, rotation=45, ha="right", fontsize=7)
@@ -216,7 +220,9 @@ def plot_weight_norm(
     mat = np.array(norms_matrix, dtype=float).T  # (layers, steps)
     mat = np.clip(mat, 1e-10, None)
 
-    fig, ax = plt.subplots(figsize=(max(4, len(steps) * 0.4 + 2), max(3, len(layer_names) * 0.3 + 1)))
+    fig, ax = plt.subplots(
+        figsize=(max(4, len(steps) * 0.4 + 2), max(3, len(layer_names) * 0.3 + 1))
+    )
     im = ax.imshow(mat, aspect="auto", norm=LogNorm(vmin=mat.min(), vmax=mat.max()))
     ax.set_xticks(range(len(steps)))
     ax.set_xticklabels(steps, rotation=45, ha="right", fontsize=7)

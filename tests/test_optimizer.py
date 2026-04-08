@@ -2,6 +2,7 @@
 
 All tests use the GPT model with a tiny synthetic config — no GPU, no data.
 """
+
 from __future__ import annotations
 
 import io
@@ -13,7 +14,6 @@ import torch.nn.functional as F
 from src.config import TrainConfig
 from src.model import GPT, RMSNorm
 from src.optimizer import make_optimizer
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -95,8 +95,7 @@ def test_ln_group_uses_multiplied_lr(model: GPT, cfg: TrainConfig) -> None:
                 ln_param_ids.add(id(p))
 
     ln_group = next(
-        g for g in opt.param_groups
-        if any(id(p) in ln_param_ids for p in g["params"])
+        g for g in opt.param_groups if any(id(p) in ln_param_ids for p in g["params"])
     )
     assert ln_group["lr"] == pytest.approx(cfg.learning_rate * cfg.ln_lr_mult)
 
@@ -108,7 +107,8 @@ def test_embed_group_uses_multiplied_lr(model: GPT, cfg: TrainConfig) -> None:
         id(p) for name, p in model.named_parameters() if "embedding" in name
     }
     embed_group = next(
-        g for g in opt.param_groups
+        g
+        for g in opt.param_groups
         if any(id(p) in embed_param_ids for p in g["params"])
     )
     assert embed_group["lr"] == pytest.approx(cfg.learning_rate * cfg.embed_lr_mult)
@@ -121,33 +121,27 @@ def test_layernorm_params_in_no_decay_group(model: GPT, cfg: TrainConfig) -> Non
     """Every parameter belonging to an RMSNorm module must be in a no-decay group."""
     opt = make_optimizer(model, cfg)
     no_decay_ids = {
-        id(p)
-        for g in opt.param_groups
-        if g["weight_decay"] == 0.0
-        for p in g["params"]
+        id(p) for g in opt.param_groups if g["weight_decay"] == 0.0 for p in g["params"]
     }
     for module in model.modules():
         if isinstance(module, RMSNorm):
             for param in module.parameters():
-                assert id(param) in no_decay_ids, (
-                    "RMSNorm parameter not found in a no-decay group"
-                )
+                assert (
+                    id(param) in no_decay_ids
+                ), "RMSNorm parameter not found in a no-decay group"
 
 
 def test_embedding_params_in_no_decay_group(model: GPT, cfg: TrainConfig) -> None:
     """Embedding parameters must be in a no-decay group."""
     opt = make_optimizer(model, cfg)
     no_decay_ids = {
-        id(p)
-        for g in opt.param_groups
-        if g["weight_decay"] == 0.0
-        for p in g["params"]
+        id(p) for g in opt.param_groups if g["weight_decay"] == 0.0 for p in g["params"]
     }
     for name, param in model.named_parameters():
         if "embedding" in name:
-            assert id(param) in no_decay_ids, (
-                f"Embedding parameter '{name}' not found in a no-decay group"
-            )
+            assert (
+                id(param) in no_decay_ids
+            ), f"Embedding parameter '{name}' not found in a no-decay group"
 
 
 def test_embedding_params_not_in_matrix_group(model: GPT, cfg: TrainConfig) -> None:
@@ -157,19 +151,16 @@ def test_embedding_params_not_in_matrix_group(model: GPT, cfg: TrainConfig) -> N
     matrix_ids = {id(p) for p in matrix_group["params"]}
     for name, param in model.named_parameters():
         if "embedding" in name:
-            assert id(param) not in matrix_ids, (
-                f"Embedding parameter '{name}' must not be in the matrix (decay) group"
-            )
+            assert (
+                id(param) not in matrix_ids
+            ), f"Embedding parameter '{name}' must not be in the matrix (decay) group"
 
 
 def test_weight_matrix_params_in_decay_group(model: GPT, cfg: TrainConfig) -> None:
     """Non-embedding, non-RMSNorm weight matrices must be in the decay group."""
     opt = make_optimizer(model, cfg)
     decay_ids = {
-        id(p)
-        for g in opt.param_groups
-        if g["weight_decay"] != 0.0
-        for p in g["params"]
+        id(p) for g in opt.param_groups if g["weight_decay"] != 0.0 for p in g["params"]
     }
     ln_ids: set[int] = set()
     for module in model.modules():
@@ -179,9 +170,9 @@ def test_weight_matrix_params_in_decay_group(model: GPT, cfg: TrainConfig) -> No
 
     for name, param in model.named_parameters():
         if "embedding" not in name and id(param) not in ln_ids:
-            assert id(param) in decay_ids, (
-                f"Weight matrix '{name}' not found in the decay group"
-            )
+            assert (
+                id(param) in decay_ids
+            ), f"Weight matrix '{name}' not found in the decay group"
 
 
 def test_bias_params_have_no_weight_decay(model: GPT, cfg: TrainConfig) -> None:
@@ -192,9 +183,9 @@ def test_bias_params_have_no_weight_decay(model: GPT, cfg: TrainConfig) -> None:
         if group["weight_decay"] != 0.0:
             group_ids = {id(p) for p in group["params"]}
             for bias_id in bias_ids:
-                assert bias_id not in group_ids, (
-                    "Bias parameter must not appear in a weight-decay group"
-                )
+                assert (
+                    bias_id not in group_ids
+                ), "Bias parameter must not appear in a weight-decay group"
 
 
 def test_all_params_covered_exactly_once(model: GPT, cfg: TrainConfig) -> None:
@@ -203,12 +194,12 @@ def test_all_params_covered_exactly_once(model: GPT, cfg: TrainConfig) -> None:
     all_ids_in_groups = [id(p) for g in opt.param_groups for p in g["params"]]
     trainable_ids = [id(p) for p in model.parameters() if p.requires_grad]
 
-    assert len(all_ids_in_groups) == len(trainable_ids), (
-        f"Group param count ({len(all_ids_in_groups)}) != model param count ({len(trainable_ids)})"
-    )
-    assert sorted(all_ids_in_groups) == sorted(trainable_ids), (
-        "Optimizer param groups do not exactly match the model's trainable parameters"
-    )
+    assert len(all_ids_in_groups) == len(
+        trainable_ids
+    ), f"Group param count ({len(all_ids_in_groups)}) != model param count ({len(trainable_ids)})"
+    assert sorted(all_ids_in_groups) == sorted(
+        trainable_ids
+    ), "Optimizer param groups do not exactly match the model's trainable parameters"
 
 
 def test_frozen_params_excluded_from_groups(model: GPT, cfg: TrainConfig) -> None:
@@ -218,9 +209,9 @@ def test_frozen_params_excluded_from_groups(model: GPT, cfg: TrainConfig) -> Non
 
     opt = make_optimizer(model, cfg)
     group_ids = {id(p) for g in opt.param_groups for p in g["params"]}
-    assert id(first_qkv.weight) not in group_ids, (
-        "Frozen parameter must not be included in any optimizer group"
-    )
+    assert (
+        id(first_qkv.weight) not in group_ids
+    ), "Frozen parameter must not be included in any optimizer group"
 
     first_qkv.weight.requires_grad_(True)
 
@@ -263,13 +254,13 @@ def test_state_save_load_identity(model: GPT, cfg: TrainConfig) -> None:
         for tensor_key, val in sd_before["state"][key].items():
             loaded_val = sd_after["state"][key][tensor_key]
             if isinstance(val, torch.Tensor):
-                assert torch.equal(val, loaded_val), (
-                    f"State mismatch at param {key}, field '{tensor_key}'"
-                )
+                assert torch.equal(
+                    val, loaded_val
+                ), f"State mismatch at param {key}, field '{tensor_key}'"
             else:
-                assert val == loaded_val, (
-                    f"State mismatch at param {key}, field '{tensor_key}'"
-                )
+                assert (
+                    val == loaded_val
+                ), f"State mismatch at param {key}, field '{tensor_key}'"
 
 
 # ── Muon / use_muon tests ─────────────────────────────────────────────────────
@@ -312,9 +303,7 @@ def test_make_optimizer_returns_tuple_when_use_muon_true(
     assert isinstance(adamw_opt, torch.optim.AdamW)
 
 
-def test_muon_group_contains_only_matrix_params(
-    model: GPT, cfg: TrainConfig
-) -> None:
+def test_muon_group_contains_only_matrix_params(model: GPT, cfg: TrainConfig) -> None:
     """Muon optimizer must contain only matrix params (no ln, no embed)."""
     muon_cfg = TrainConfig(
         vocab_size=cfg.vocab_size,
@@ -405,9 +394,9 @@ def test_all_params_covered_exactly_once_use_muon_true(
     all_ids += [id(p) for g in adamw_opt.param_groups for p in g["params"]]
     trainable_ids = [id(p) for p in model.parameters() if p.requires_grad]
 
-    assert len(all_ids) == len(trainable_ids), (
-        f"Combined param count ({len(all_ids)}) != model param count ({len(trainable_ids)})"
-    )
-    assert sorted(all_ids) == sorted(trainable_ids), (
-        "Combined param groups do not exactly match the model's trainable parameters"
-    )
+    assert len(all_ids) == len(
+        trainable_ids
+    ), f"Combined param count ({len(all_ids)}) != model param count ({len(trainable_ids)})"
+    assert sorted(all_ids) == sorted(
+        trainable_ids
+    ), "Combined param groups do not exactly match the model's trainable parameters"

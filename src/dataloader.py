@@ -18,6 +18,7 @@ Design notes
 - Token IDs are validated against cfg.vocab_size on entry; out-of-range
   IDs raise ValueError immediately rather than corrupting a batch silently.
 """
+
 from __future__ import annotations
 
 from collections.abc import Generator, Iterable

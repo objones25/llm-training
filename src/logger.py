@@ -17,6 +17,7 @@ Call ``configure_logging(cfg)`` once from ``train.py`` before the training
 loop.  Tests do *not* call ``configure_logging``; pytest's ``caplog``
 fixture captures records through normal propagation to the root logger.
 """
+
 from __future__ import annotations
 
 import logging
@@ -108,9 +109,7 @@ class GradientLogger:
         # not just at the next grad_log_every boundary.
         if grad_norm > self.cfg.grad_norm_spike_threshold:
             for name, norm in layer_norms.items():
-                _log.debug(
-                    f"spike step={step} layer={name} norm={norm:.4f}"
-                )
+                _log.debug(f"spike step={step} layer={name} norm={norm:.4f}")
 
     def log_val(self, step: int, val_loss: float) -> None:
         """Emit one validation-loss line (INFO — console + file).
@@ -142,4 +141,6 @@ class GradientLogger:
 
         if step % self.cfg.weight_log_every == 0:
             for name, p in model.named_parameters():  # type: ignore[union-attr]
-                _log.debug(f"weight step={step} layer={name} norm={p.norm().item():.4f}")
+                _log.debug(
+                    f"weight step={step} layer={name} norm={p.norm().item():.4f}"
+                )

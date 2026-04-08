@@ -3,6 +3,7 @@
 All tests use a tiny 2-layer GPT model on CPU with synthetic data.
 Disk I/O is isolated to tmp_path -- no manual cleanup required.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +17,6 @@ from src.config import TrainConfig
 from src.model import GPT
 from src.optimizer import make_optimizer
 from src.scheduler import make_scheduler
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -49,13 +49,17 @@ def optimizer(model: GPT, cfg: TrainConfig) -> torch.optim.AdamW:
 # ── File creation ─────────────────────────────────────────────────────────────
 
 
-def test_save_creates_file(model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig) -> None:
+def test_save_creates_file(
+    model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig
+) -> None:
     """save_checkpoint must create a .pt file on disk."""
     path = save_checkpoint(model, optimizer, step=100, cfg=cfg)
     assert path.exists(), "Checkpoint file was not created"
 
 
-def test_save_returns_path(model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig) -> None:
+def test_save_returns_path(
+    model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig
+) -> None:
     """save_checkpoint must return a Path object pointing to the saved file."""
     result = save_checkpoint(model, optimizer, step=50, cfg=cfg)
     assert isinstance(result, Path)
@@ -142,9 +146,9 @@ def test_logit_identity_after_load(
     with torch.no_grad():
         logits_after = model(idx)
 
-    assert torch.equal(logits_before, logits_after), (
-        "Logits after load do not match logits before save"
-    )
+    assert torch.equal(
+        logits_before, logits_after
+    ), "Logits after load do not match logits before save"
 
 
 # ── Optimizer state restore (CLAUDE.md rule 11) ───────────────────────────────
@@ -177,9 +181,9 @@ def test_optimizer_state_restored(
         for tensor_key, val in sd_before["state"][key].items():
             loaded_val = sd_after["state"][key][tensor_key]
             if isinstance(val, torch.Tensor):
-                assert torch.equal(val, loaded_val), (
-                    f"Optimizer state mismatch at param {key}, field '{tensor_key}'"
-                )
+                assert torch.equal(
+                    val, loaded_val
+                ), f"Optimizer state mismatch at param {key}, field '{tensor_key}'"
             else:
                 assert val == loaded_val
 
@@ -214,9 +218,9 @@ def test_scheduler_state_round_trip(
     lr_after = optimizer.param_groups[0]["lr"]
     lr_after2 = optimizer2.param_groups[0]["lr"]
 
-    assert abs(lr_after - lr_after2) < 1e-9, (
-        f"LR mismatch after scheduler round-trip: {lr_after} vs {lr_after2}"
-    )
+    assert (
+        abs(lr_after - lr_after2) < 1e-9
+    ), f"LR mismatch after scheduler round-trip: {lr_after} vs {lr_after2}"
     _ = lr_before  # referenced only to confirm step > 0
 
 
@@ -329,6 +333,7 @@ def muon_model(muon_cfg: TrainConfig) -> GPT:
 @pytest.fixture
 def tuple_optimizer(muon_model: GPT, muon_cfg: TrainConfig):
     from src.optimizer import make_optimizer
+
     return make_optimizer(muon_model, muon_cfg)
 
 
@@ -340,8 +345,11 @@ def test_save_load_tuple_optimizer(
     torch.manual_seed(42)
     muon_opt, adamw_opt = tuple_optimizer
     idx = torch.randint(0, muon_cfg.vocab_size, (muon_cfg.batch_size, muon_cfg.seq_len))
-    targets = torch.randint(0, muon_cfg.vocab_size, (muon_cfg.batch_size, muon_cfg.seq_len))
+    targets = torch.randint(
+        0, muon_cfg.vocab_size, (muon_cfg.batch_size, muon_cfg.seq_len)
+    )
     import torch.nn.functional as F
+
     logits = muon_model(idx)
     loss = F.cross_entropy(logits.view(-1, muon_cfg.vocab_size), targets.view(-1))
     loss.backward()
@@ -379,14 +387,18 @@ def test_logit_identity_tuple_optimizer(
     with torch.no_grad():
         logits_after = muon_model(idx)
 
-    assert torch.equal(logits_before, logits_after), (
-        "Logits after load (tuple optimizer) do not match logits before save"
-    )
+    assert torch.equal(
+        logits_before, logits_after
+    ), "Logits after load (tuple optimizer) do not match logits before save"
 
 
 def test_optimizer_type_mismatch_raises(
-    model: GPT, optimizer: torch.optim.AdamW, cfg: TrainConfig,
-    muon_model: GPT, tuple_optimizer, muon_cfg: TrainConfig,
+    model: GPT,
+    optimizer: torch.optim.AdamW,
+    cfg: TrainConfig,
+    muon_model: GPT,
+    tuple_optimizer,
+    muon_cfg: TrainConfig,
 ) -> None:
     """Loading a single-optimizer checkpoint with a tuple optimizer must raise ValueError."""
     path = save_checkpoint(model, optimizer, step=1, cfg=cfg)

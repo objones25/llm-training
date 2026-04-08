@@ -4,6 +4,7 @@ Pipeline: ByteLevel pre-tokenizer → BPE model → ByteLevel decoder.
 No normalizer: ByteLevel handles the full byte range without lossy normalization.
 No post-processor: BOS/EOS injection is the dataloader's responsibility.
 """
+
 from __future__ import annotations
 
 from typing import Iterable

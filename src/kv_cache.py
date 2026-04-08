@@ -15,6 +15,7 @@ Two-phase generation
 
 The training forward pass (``kv_cache=None``) is completely unaffected.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -87,8 +88,12 @@ class KVCache:
         """
         layers = [
             LayerKVCache(
-                k=torch.zeros(batch_size, n_heads, 0, head_dim, device=device, dtype=dtype),
-                v=torch.zeros(batch_size, n_heads, 0, head_dim, device=device, dtype=dtype),
+                k=torch.zeros(
+                    batch_size, n_heads, 0, head_dim, device=device, dtype=dtype
+                ),
+                v=torch.zeros(
+                    batch_size, n_heads, 0, head_dim, device=device, dtype=dtype
+                ),
             )
             for _ in range(n_layers)
         ]

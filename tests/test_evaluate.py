@@ -11,6 +11,7 @@ Rules covered
  - sample_text: returns list of ints of correct length, seed tokens preserved
  - Smoke: save checkpoint -> load -> compute_perplexity
 """
+
 from __future__ import annotations
 
 import math
@@ -29,7 +30,6 @@ from src.checkpoint import save_checkpoint
 from src.config import TrainConfig
 from src.model import GPT
 from src.optimizer import make_optimizer
-
 
 # -- Helpers ------------------------------------------------------------------
 
@@ -154,9 +154,9 @@ def test_load_checkpoint_for_eval_weights_match(tmp_path: Path) -> None:
     for (name, orig_p), (_, loaded_p) in zip(
         original_model.named_parameters(), loaded_model.named_parameters()
     ):
-        assert torch.equal(orig_p.data, loaded_p.data), (
-            f"Weight mismatch for parameter '{name}'"
-        )
+        assert torch.equal(
+            orig_p.data, loaded_p.data
+        ), f"Weight mismatch for parameter '{name}'"
 
 
 # -- compute_perplexity -------------------------------------------------------
@@ -255,9 +255,9 @@ def test_sample_text_tokens_in_vocab() -> None:
     model = GPT(cfg)
     seed = [0, 1]
     result = sample_text(model, cfg, torch.device("cpu"), seed, max_new_tokens=20)
-    assert all(0 <= t < cfg.vocab_size for t in result), (
-        "Generated token IDs must be within vocab bounds"
-    )
+    assert all(
+        0 <= t < cfg.vocab_size for t in result
+    ), "Generated token IDs must be within vocab bounds"
 
 
 def test_sample_text_greedy_deterministic() -> None:

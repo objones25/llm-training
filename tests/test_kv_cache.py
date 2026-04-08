@@ -8,6 +8,7 @@ Greedy (top_k=1) generation with the KV cache must produce bit-identical
 outputs to the same generation without the cache.  This is the gold-standard
 test: if the cached and uncached paths disagree, the cache is broken.
 """
+
 from __future__ import annotations
 
 import torch
@@ -16,8 +17,8 @@ from src.config import TrainConfig
 from src.kv_cache import KVCache, LayerKVCache
 from src.model import GPT
 
-
 # ── Minimal config for fast CPU tests ────────────────────────────────────────
+
 
 def _tiny_cfg(**overrides) -> TrainConfig:
     """2-layer, d_model=64, n_heads=4, vocab=128, seq_len=32."""
@@ -60,7 +61,10 @@ def test_layer_kv_cache_seq_len_populated():
 
 def test_kv_cache_empty_shape():
     cache = KVCache.empty(
-        n_layers=3, batch_size=1, n_heads=4, head_dim=16,
+        n_layers=3,
+        batch_size=1,
+        n_heads=4,
+        head_dim=16,
         device=torch.device("cpu"),
     )
     assert len(cache.layers) == 3
@@ -71,7 +75,10 @@ def test_kv_cache_empty_shape():
 
 def test_kv_cache_empty_seq_len_zero():
     cache = KVCache.empty(
-        n_layers=2, batch_size=1, n_heads=4, head_dim=16,
+        n_layers=2,
+        batch_size=1,
+        n_heads=4,
+        head_dim=16,
         device=torch.device("cpu"),
     )
     assert cache.seq_len == 0
@@ -79,8 +86,12 @@ def test_kv_cache_empty_seq_len_zero():
 
 def test_kv_cache_empty_dtype():
     cache = KVCache.empty(
-        n_layers=2, batch_size=1, n_heads=4, head_dim=16,
-        device=torch.device("cpu"), dtype=torch.float16,
+        n_layers=2,
+        batch_size=1,
+        n_heads=4,
+        head_dim=16,
+        device=torch.device("cpu"),
+        dtype=torch.float16,
     )
     for layer in cache.layers:
         assert layer.k.dtype == torch.float16
@@ -89,7 +100,10 @@ def test_kv_cache_empty_dtype():
 
 def test_kv_cache_empty_device():
     cache = KVCache.empty(
-        n_layers=2, batch_size=1, n_heads=4, head_dim=16,
+        n_layers=2,
+        batch_size=1,
+        n_heads=4,
+        head_dim=16,
         device=torch.device("cpu"),
     )
     for layer in cache.layers:
@@ -110,8 +124,10 @@ def test_prefill_populates_cache():
     T_seed = 5
     idx = torch.randint(0, cfg.vocab_size, (1, T_seed))
     cache = KVCache.empty(
-        n_layers=cfg.n_layers, batch_size=1,
-        n_heads=cfg.n_heads, head_dim=cfg.d_model // cfg.n_heads,
+        n_layers=cfg.n_layers,
+        batch_size=1,
+        n_heads=cfg.n_heads,
+        head_dim=cfg.d_model // cfg.n_heads,
         device=torch.device("cpu"),
     )
 
@@ -134,8 +150,10 @@ def test_generation_step_extends_cache_by_one():
     T_seed = 4
     idx = torch.randint(0, cfg.vocab_size, (1, T_seed))
     cache = KVCache.empty(
-        n_layers=cfg.n_layers, batch_size=1,
-        n_heads=cfg.n_heads, head_dim=cfg.d_model // cfg.n_heads,
+        n_layers=cfg.n_layers,
+        batch_size=1,
+        n_heads=cfg.n_heads,
+        head_dim=cfg.d_model // cfg.n_heads,
         device=torch.device("cpu"),
     )
 
@@ -177,17 +195,19 @@ def test_position_offset_applied():
 
         # Build populated cache then query same token at position T_seed
         cache = KVCache.empty(
-            n_layers=cfg.n_layers, batch_size=1,
-            n_heads=cfg.n_heads, head_dim=cfg.d_model // cfg.n_heads,
+            n_layers=cfg.n_layers,
+            batch_size=1,
+            n_heads=cfg.n_heads,
+            head_dim=cfg.d_model // cfg.n_heads,
             device=torch.device("cpu"),
         )
         model(seed, kv_cache=cache)
         logits_posN = model(single, kv_cache=cache)  # [1, 1, vocab]
 
     # Outputs must differ because RoPE rotations depend on absolute position.
-    assert not torch.allclose(logits_pos0, logits_posN), (
-        "Logits should differ when position offset changes"
-    )
+    assert not torch.allclose(
+        logits_pos0, logits_posN
+    ), "Logits should differ when position offset changes"
 
 
 # ── Correctness: cached == uncached (greedy) ──────────────────────────────────
@@ -211,7 +231,7 @@ def test_cached_greedy_matches_uncached():
     generated_uncached = list(seed)
     with torch.no_grad():
         for _ in range(n_new):
-            ctx = generated_uncached[-cfg.seq_len:]
+            ctx = generated_uncached[-cfg.seq_len :]
             idx = torch.tensor([ctx], dtype=torch.long)
             logits = model(idx)
             next_tok = logits[0, -1, :].argmax().item()
@@ -221,8 +241,10 @@ def test_cached_greedy_matches_uncached():
     generated_cached = list(seed)
     with torch.no_grad():
         cache = KVCache.empty(
-            n_layers=cfg.n_layers, batch_size=1,
-            n_heads=cfg.n_heads, head_dim=cfg.d_model // cfg.n_heads,
+            n_layers=cfg.n_layers,
+            batch_size=1,
+            n_heads=cfg.n_heads,
+            head_dim=cfg.d_model // cfg.n_heads,
             device=torch.device("cpu"),
         )
         seed_tensor = torch.tensor([seed], dtype=torch.long)
@@ -236,9 +258,9 @@ def test_cached_greedy_matches_uncached():
             logits = model(idx, kv_cache=cache)
             next_logits = logits[0, -1, :]
 
-    assert generated_cached == generated_uncached, (
-        f"Cached {generated_cached} != uncached {generated_uncached}"
-    )
+    assert (
+        generated_cached == generated_uncached
+    ), f"Cached {generated_cached} != uncached {generated_uncached}"
 
 
 # ── Training path is unaffected ───────────────────────────────────────────────
@@ -281,9 +303,9 @@ def test_no_cache_uses_is_causal_true():
         out_mod = model(idx_modified)
 
     # Positions 0..2 must be identical (causal: they can't see pos 3)
-    assert torch.allclose(out_orig[0, :3], out_mod[0, :3]), (
-        "Causal masking violated: logits at positions < 3 changed when pos 3 changed"
-    )
+    assert torch.allclose(
+        out_orig[0, :3], out_mod[0, :3]
+    ), "Causal masking violated: logits at positions < 3 changed when pos 3 changed"
 
 
 # ── sample_text integration test ─────────────────────────────────────────────
@@ -299,7 +321,9 @@ def test_sample_text_with_cache_returns_correct_length():
     model.eval()
 
     seed = [1, 2, 3]
-    result = sample_text(model, cfg, torch.device("cpu"), seed, max_new_tokens=10, top_k=1)
+    result = sample_text(
+        model, cfg, torch.device("cpu"), seed, max_new_tokens=10, top_k=1
+    )
     assert len(result) == len(seed) + 10
 
 
@@ -313,8 +337,12 @@ def test_sample_text_greedy_deterministic_with_cache():
     model.eval()
 
     seed = [5, 10, 15]
-    result1 = sample_text(model, cfg, torch.device("cpu"), seed, max_new_tokens=5, top_k=1)
-    result2 = sample_text(model, cfg, torch.device("cpu"), seed, max_new_tokens=5, top_k=1)
+    result1 = sample_text(
+        model, cfg, torch.device("cpu"), seed, max_new_tokens=5, top_k=1
+    )
+    result2 = sample_text(
+        model, cfg, torch.device("cpu"), seed, max_new_tokens=5, top_k=1
+    )
     assert result1 == result2
 
 
@@ -339,12 +367,12 @@ def test_sample_text_cached_matches_uncached_generation():
     uncached = list(seed)
     with torch.no_grad():
         for _ in range(n_new):
-            ctx = uncached[-cfg.seq_len:]
+            ctx = uncached[-cfg.seq_len :]
             idx = torch.tensor([ctx], dtype=torch.long)
             logits = model(idx)
             next_tok = logits[0, -1, :].argmax().item()
             uncached.append(int(next_tok))
 
-    assert cached_result == uncached, (
-        f"sample_text cached {cached_result} != uncached {uncached}"
-    )
+    assert (
+        cached_result == uncached
+    ), f"sample_text cached {cached_result} != uncached {uncached}"

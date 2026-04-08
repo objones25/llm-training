@@ -35,6 +35,7 @@ Public API
         cfg: TrainConfig,
     ) -> torch.optim.AdamW | tuple[Muon, torch.optim.AdamW]
 """
+
 from __future__ import annotations
 
 import torch.nn as nn
@@ -104,8 +105,16 @@ def make_optimizer(
         muon_opt = Muon(matrix_params, lr=base_lr)
         adamw_opt = torch.optim.AdamW(
             [
-                {"params": ln_params,    "lr": base_lr * cfg.ln_lr_mult,    "weight_decay": 0.0},
-                {"params": embed_params, "lr": base_lr * cfg.embed_lr_mult, "weight_decay": 0.0},
+                {
+                    "params": ln_params,
+                    "lr": base_lr * cfg.ln_lr_mult,
+                    "weight_decay": 0.0,
+                },
+                {
+                    "params": embed_params,
+                    "lr": base_lr * cfg.embed_lr_mult,
+                    "weight_decay": 0.0,
+                },
             ],
             lr=base_lr,
             betas=cfg.adamw_betas,
@@ -114,9 +123,13 @@ def make_optimizer(
         return (muon_opt, adamw_opt)
 
     param_groups = [
-        {"params": ln_params,     "lr": base_lr * cfg.ln_lr_mult,    "weight_decay": 0.0},
-        {"params": embed_params,  "lr": base_lr * cfg.embed_lr_mult, "weight_decay": 0.0},
-        {"params": matrix_params, "lr": base_lr,                     "weight_decay": cfg.weight_decay},
+        {"params": ln_params, "lr": base_lr * cfg.ln_lr_mult, "weight_decay": 0.0},
+        {
+            "params": embed_params,
+            "lr": base_lr * cfg.embed_lr_mult,
+            "weight_decay": 0.0,
+        },
+        {"params": matrix_params, "lr": base_lr, "weight_decay": cfg.weight_decay},
     ]
     return torch.optim.AdamW(
         param_groups,

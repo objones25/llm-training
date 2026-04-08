@@ -3,6 +3,7 @@
 Covers Newton-Schulz orthogonalization and the Muon optimizer step.
 All tests run on CPU with synthetic tensors — no GPU required.
 """
+
 from __future__ import annotations
 
 import io
@@ -12,7 +13,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.muon import Muon, zeropower_via_newtonschulz5
-
 
 # ── Newton-Schulz tests ───────────────────────────────────────────────────────
 
@@ -37,9 +37,9 @@ def test_newtonschulz_spectral_norm_approx_one() -> None:
     out = zeropower_via_newtonschulz5(G)
     # Compute largest singular value via SVD.
     _, S, _ = torch.linalg.svd(out.float(), full_matrices=False)
-    assert 0.8 < S[0].item() < 1.3, (
-        f"Largest singular value {S[0].item():.4f} outside expected range (0.8, 1.3)"
-    )
+    assert (
+        0.8 < S[0].item() < 1.3
+    ), f"Largest singular value {S[0].item():.4f} outside expected range (0.8, 1.3)"
 
 
 def test_newtonschulz_spectral_norm_wide_matrix() -> None:
@@ -48,9 +48,9 @@ def test_newtonschulz_spectral_norm_wide_matrix() -> None:
     G = torch.randn(16, 32)  # wide: shape[0] < shape[1]
     out = zeropower_via_newtonschulz5(G)
     _, S, _ = torch.linalg.svd(out.float(), full_matrices=False)
-    assert 0.8 < S[0].item() < 1.3, (
-        f"Largest singular value {S[0].item():.4f} outside expected range (wide matrix)"
-    )
+    assert (
+        0.8 < S[0].item() < 1.3
+    ), f"Largest singular value {S[0].item():.4f} outside expected range (wide matrix)"
 
 
 def test_newtonschulz_tall_matrix() -> None:
@@ -60,9 +60,9 @@ def test_newtonschulz_tall_matrix() -> None:
     out = zeropower_via_newtonschulz5(G)
     assert out.shape == G.shape
     _, S, _ = torch.linalg.svd(out.float(), full_matrices=False)
-    assert 0.8 < S[0].item() < 1.3, (
-        f"Largest singular value {S[0].item():.4f} outside expected range (tall matrix)"
-    )
+    assert (
+        0.8 < S[0].item() < 1.3
+    ), f"Largest singular value {S[0].item():.4f} outside expected range (tall matrix)"
 
 
 def test_newtonschulz_dtype_preserved_float32() -> None:
@@ -125,9 +125,9 @@ def test_muon_step_updates_weights() -> None:
     loss.backward()
     opt.step()
 
-    assert not torch.equal(model.weight.data, original), (
-        "Muon step did not update weights"
-    )
+    assert not torch.equal(
+        model.weight.data, original
+    ), "Muon step did not update weights"
 
 
 def test_muon_step_decreases_loss() -> None:
@@ -146,9 +146,9 @@ def test_muon_step_decreases_loss() -> None:
         loss.backward()
         opt.step()
         current = loss.item()
-        assert current < prev_loss, (
-            f"Loss did not decrease: {current:.6f} >= {prev_loss:.6f}"
-        )
+        assert (
+            current < prev_loss
+        ), f"Loss did not decrease: {current:.6f} >= {prev_loss:.6f}"
         prev_loss = current
 
 
@@ -185,9 +185,9 @@ def test_muon_momentum_buffer_initialized_to_zeros() -> None:
     p = model.weight
     assert p in opt.state, "Parameter not found in optimizer state"
     buf = opt.state[p]["momentum_buffer"]
-    assert buf.shape == p.shape, (
-        f"Momentum buffer shape {buf.shape} != param shape {p.shape}"
-    )
+    assert (
+        buf.shape == p.shape
+    ), f"Momentum buffer shape {buf.shape} != param shape {p.shape}"
 
 
 def test_muon_state_dict_roundtrip() -> None:
@@ -214,9 +214,9 @@ def test_muon_state_dict_roundtrip() -> None:
     for key in sd_before["state"]:
         buf_before = sd_before["state"][key]["momentum_buffer"]
         buf_after = sd_after["state"][key]["momentum_buffer"]
-        assert torch.equal(buf_before, buf_after), (
-            "Momentum buffer mismatch after state_dict round-trip"
-        )
+        assert torch.equal(
+            buf_before, buf_after
+        ), "Momentum buffer mismatch after state_dict round-trip"
 
 
 def test_muon_no_grad_skipped() -> None:
@@ -229,6 +229,6 @@ def test_muon_no_grad_skipped() -> None:
     # Do NOT call backward — gradient is None.
     opt.step()
 
-    assert torch.equal(model.weight.data, original), (
-        "Weight changed even though gradient was None"
-    )
+    assert torch.equal(
+        model.weight.data, original
+    ), "Weight changed even though gradient was None"

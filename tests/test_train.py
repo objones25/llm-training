@@ -10,6 +10,7 @@ Rules covered
 18  Smoke: 10 steps on synthetic data, final loss < initial loss.
 23  RuntimeError is raised (not silently ignored) when loss is nan/inf.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -22,7 +23,6 @@ import torch.nn.functional
 from src.config import TrainConfig
 from src.model import GPT
 from src.train import train
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,8 +42,8 @@ def _cfg(tmp_path: Path, **overrides) -> TrainConfig:
         learning_rate=1e-3,
         weight_decay=0.1,
         grad_clip=1.0,
-        checkpoint_every=1000,   # no checkpoint by default
-        plot_every=1000,          # no plots by default
+        checkpoint_every=1000,  # no checkpoint by default
+        plot_every=1000,  # no plots by default
         grad_log_every=5,
         weight_log_every=5,
         grad_norm_warn_threshold=100.0,
@@ -61,7 +61,9 @@ def _token_stream() -> list[int]:
     return list(range(256)) * 40
 
 
-def _random_val_stream(vocab_size: int = 256, n: int = 10_240, seed: int = 7) -> list[int]:
+def _random_val_stream(
+    vocab_size: int = 256, n: int = 10_240, seed: int = 7
+) -> list[int]:
     """Random token stream for validation — uncorrelated with the cycling train stream.
 
     The model trains on a cycling pattern (0,1,...,255,0,...) and learns to
@@ -113,9 +115,9 @@ def test_smoke_10_steps_loss_decreases(
     train(cfg, token_stream=_token_stream())
     losses = _parse_step_losses(capsys.readouterr().err)
     assert len(losses) == 10, f"Expected 10 logged steps, got {len(losses)}"
-    assert losses[-1] < losses[0], (
-        f"Final loss {losses[-1]:.4f} not less than initial {losses[0]:.4f}"
-    )
+    assert (
+        losses[-1] < losses[0]
+    ), f"Final loss {losses[-1]:.4f} not less than initial {losses[0]:.4f}"
 
 
 # ── Monotone decrease on fixed batch (rule 6) ────────────────────────────────
@@ -144,9 +146,9 @@ def test_loss_monotone_fixed_batch(
     train(cfg, token_stream=_fixed_batch_stream(cfg))
     losses = _parse_step_losses(capsys.readouterr().err)
     assert len(losses) >= 3
-    assert losses[0] > losses[1] > losses[2], (
-        f"Expected strict decrease for first 3 steps, got {losses[:3]}"
-    )
+    assert (
+        losses[0] > losses[1] > losses[2]
+    ), f"Expected strict decrease for first 3 steps, got {losses[:3]}"
 
 
 # ── Gradient sanity (rule 10) ─────────────────────────────────────────────────
@@ -263,9 +265,7 @@ def test_val_loss_logged_when_stream_provided(
         assert "val_loss=" in line, f"Malformed val line: {line!r}"
 
 
-def test_val_loss_format(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_val_loss_format(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     """val line format must be 'val step=N val_loss=X.XXXX'."""
     cfg = _cfg(tmp_path, max_steps=3, val_every=1, val_batches=1)
     torch.manual_seed(0)
@@ -304,9 +304,7 @@ def test_val_loss_disabled_when_val_every_zero(
     assert val_lines == [], f"Unexpected val lines with val_every=0: {val_lines}"
 
 
-def test_val_loss_is_finite(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_val_loss_is_finite(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     """Logged val_loss values must be finite and positive."""
     cfg = _cfg(tmp_path, max_steps=4, val_every=2, val_batches=2)
     torch.manual_seed(0)
@@ -336,7 +334,9 @@ def test_early_stopping_halts_training(tmp_path: Path) -> None:
         early_stopping_patience=1,
     )
     torch.manual_seed(0)
-    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_random_val_stream()))
+    train(
+        cfg, token_stream=_token_stream(), val_token_stream=iter(_random_val_stream())
+    )
     # If early stopping worked, we completed far fewer than 1000 steps.
     # (Token stream has 10 240 tokens → ~300 batches, so exhaustion ≠ 1000 steps.)
     # The key assertion: training did not run max_steps iterations.
@@ -356,11 +356,13 @@ def test_early_stopping_logs_message(
         early_stopping_patience=1,
     )
     torch.manual_seed(0)
-    train(cfg, token_stream=_token_stream(), val_token_stream=iter(_random_val_stream()))
-    err = capsys.readouterr().err
-    assert any("early_stopping" in line for line in err.splitlines()), (
-        "Expected 'early_stopping' in stderr when early stopping triggers"
+    train(
+        cfg, token_stream=_token_stream(), val_token_stream=iter(_random_val_stream())
     )
+    err = capsys.readouterr().err
+    assert any(
+        "early_stopping" in line for line in err.splitlines()
+    ), "Expected 'early_stopping' in stderr when early stopping triggers"
 
 
 def test_early_stopping_disabled_when_zero(
@@ -377,9 +379,9 @@ def test_early_stopping_disabled_when_zero(
     torch.manual_seed(0)
     train(cfg, token_stream=_token_stream(), val_token_stream=iter(_token_stream()))
     err = capsys.readouterr().err
-    assert not any("early_stopping" in line for line in err.splitlines()), (
-        "early_stopping message must not appear when patience=0"
-    )
+    assert not any(
+        "early_stopping" in line for line in err.splitlines()
+    ), "early_stopping message must not appear when patience=0"
     step_lines = [ln for ln in err.splitlines() if ln.startswith("step=")]
     assert len(step_lines) == 10, f"Expected 10 steps, got {len(step_lines)}"
 

@@ -1,4 +1,5 @@
 """Load HuggingFace authentication token from .env."""
+
 from __future__ import annotations
 
 import os

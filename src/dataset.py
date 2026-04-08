@@ -7,6 +7,7 @@ Public API
 ----------
     stream_documents(cfg: TrainConfig) -> Generator[str, None, None]
 """
+
 from __future__ import annotations
 
 import os

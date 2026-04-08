@@ -12,6 +12,7 @@ Public API
     zeropower_via_newtonschulz5(G, steps=5) -> Tensor
     Muon(params, lr, momentum=0.95, nesterov=True)
 """
+
 from __future__ import annotations
 
 import torch

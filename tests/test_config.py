@@ -3,6 +3,7 @@
 All invalid-config cases must raise ValueError at construction time (fail fast),
 not deep inside a forward pass or optimizer step.
 """
+
 from __future__ import annotations
 
 import pytest

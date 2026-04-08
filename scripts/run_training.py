@@ -16,6 +16,7 @@ Usage::
         --checkpoint-dir checkpoints \\
         --plot-dir plots
 """
+
 from __future__ import annotations
 
 import argparse
@@ -83,7 +84,7 @@ def main() -> None:
         "--val-bin",
         default="data/val.bin",
         help="Path to the uint16 validation token file (default: data/val.bin). "
-             "Skipped if the file does not exist.",
+        "Skipped if the file does not exist.",
     )
     parser.add_argument(
         "--early-stopping-patience",
@@ -147,12 +148,9 @@ def main() -> None:
     del tokens_mmap  # release mmap; _token_stream() opens a fresh one
 
     tokens_per_step = cfg.batch_size * cfg.seq_len
-    n_params_approx = (
-        cfg.n_layers
-        * (
-            4 * cfg.d_model * cfg.d_model   # attention projections (Q,K,V,O)
-            + 2 * cfg.d_model * cfg.d_ff    # FF up + down
-        )
+    n_params_approx = cfg.n_layers * (
+        4 * cfg.d_model * cfg.d_model  # attention projections (Q,K,V,O)
+        + 2 * cfg.d_model * cfg.d_ff  # FF up + down
     )
     compute_flops = 6 * n_params_approx * tokens_per_step * cfg.max_steps
 
@@ -162,16 +160,24 @@ def main() -> None:
     print(f"train.bin : {n_tokens:,} tokens  ({train_bin.stat().st_size / 1e9:.2f} GB)")
     if val_stream is not None:
         val_n_tokens = len(np.memmap(val_bin, dtype="<u2", mode="r"))
-        print(f"val.bin   : {val_n_tokens:,} tokens  ({val_bin.stat().st_size / 1e6:.1f} MB)  "
-              f"val_every={cfg.val_every}  val_batches={cfg.val_batches}")
+        print(
+            f"val.bin   : {val_n_tokens:,} tokens  ({val_bin.stat().st_size / 1e6:.1f} MB)  "
+            f"val_every={cfg.val_every}  val_batches={cfg.val_batches}"
+        )
     else:
         print("val.bin   : not found — validation loss disabled")
-    print(f"config    : {cfg.n_layers}-layer  d_model={cfg.d_model}  n_heads={cfg.n_heads}  "
-          f"d_ff={cfg.d_ff}  vocab={cfg.vocab_size}")
-    print(f"training  : max_steps={cfg.max_steps:,}  batch_size={cfg.batch_size}  "
-          f"seq_len={cfg.seq_len}  lr={cfg.learning_rate}  device={cfg.device}")
-    print(f"compute   : ~{compute_flops / 1e18:.2f} EFLOPs  "
-          f"(N≈{n_params_approx / 1e6:.0f}M non-emb params)")
+    print(
+        f"config    : {cfg.n_layers}-layer  d_model={cfg.d_model}  n_heads={cfg.n_heads}  "
+        f"d_ff={cfg.d_ff}  vocab={cfg.vocab_size}"
+    )
+    print(
+        f"training  : max_steps={cfg.max_steps:,}  batch_size={cfg.batch_size}  "
+        f"seq_len={cfg.seq_len}  lr={cfg.learning_rate}  device={cfg.device}"
+    )
+    print(
+        f"compute   : ~{compute_flops / 1e18:.2f} EFLOPs  "
+        f"(N≈{n_params_approx / 1e6:.0f}M non-emb params)"
+    )
     print(f"outputs   : checkpoints → {cfg.checkpoint_dir}  plots → {cfg.plot_dir}")
     print()
     print("Starting training...")

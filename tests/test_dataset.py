@@ -2,6 +2,7 @@
 
 All tests mock datasets.load_dataset — no network access, no HuggingFace calls.
 """
+
 from __future__ import annotations
 
 import types
@@ -11,7 +12,6 @@ import pytest
 
 from src.config import TrainConfig
 from src.dataset import stream_documents
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -103,7 +103,9 @@ def test_uses_streaming_mode(cfg: TrainConfig) -> None:
 # ── Authentication ────────────────────────────────────────────────────────────
 
 
-def test_passes_hf_token_from_env(cfg: TrainConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_passes_hf_token_from_env(
+    cfg: TrainConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """HF_TOKEN from the environment must be forwarded to load_dataset as token=."""
     monkeypatch.setenv("HF_TOKEN", "hf_test_token_abc123")
     mock_ds = _make_mock_dataset([])

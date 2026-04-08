@@ -18,6 +18,7 @@ Usage::
     # Evaluate on a specific checkpoint
     uv run python scripts/evaluate.py --checkpoint checkpoints/checkpoint_0005000.pt
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,7 +32,6 @@ import torch.nn.functional as F
 from src.config import TrainConfig
 from src.dataloader import make_batches
 from src.model import GPT
-
 
 # ── Checkpoint discovery ──────────────────────────────────────────────────────
 
@@ -196,7 +196,7 @@ def sample_text(
     with torch.no_grad():
         # ── Prefill ───────────────────────────────────────────────────────────
         # Clip seed to seq_len in case caller passes a long prompt.
-        seed = generated[-cfg.seq_len:]
+        seed = generated[-cfg.seq_len :]
         seed_tensor = torch.tensor([seed], dtype=torch.long, device=device)
 
         param_dtype = next(model.parameters()).dtype
@@ -238,6 +238,7 @@ def sample_text(
 def _token_stream_from_bin(path: Path) -> Iterator[int]:
     """Lazily yield token IDs from a flat uint16 binary file."""
     import numpy as np
+
     tokens = np.memmap(path, dtype="<u2", mode="r")
     for tok in tokens:
         yield int(tok)
@@ -266,7 +267,7 @@ def main() -> None:
         "--checkpoint",
         default=None,
         help="Path to a specific .pt checkpoint file.  "
-             "When omitted, the latest checkpoint in --checkpoint-dir is used.",
+        "When omitted, the latest checkpoint in --checkpoint-dir is used.",
     )
     parser.add_argument(
         "--checkpoint-dir",
@@ -298,7 +299,7 @@ def main() -> None:
         "--tokenizer",
         default=None,
         help="Path to tokenizer JSON file for decoding generated text.  "
-             "Auto-discovered from cwd if omitted.",
+        "Auto-discovered from cwd if omitted.",
     )
     parser.add_argument(
         "--top-k",
@@ -337,8 +338,10 @@ def main() -> None:
     # ── Load model from checkpoint ────────────────────────────────────────────
     model, cfg, step = load_checkpoint_for_eval(ckpt_path)
     print(f"step       : {step:,}")
-    print(f"config     : {cfg.n_layers}-layer  d_model={cfg.d_model}  "
-          f"n_heads={cfg.n_heads}  vocab={cfg.vocab_size}")
+    print(
+        f"config     : {cfg.n_layers}-layer  d_model={cfg.d_model}  "
+        f"n_heads={cfg.n_heads}  vocab={cfg.vocab_size}"
+    )
 
     device_str = args.device or cfg.device
     device = torch.device(device_str)
@@ -356,6 +359,7 @@ def main() -> None:
     _batch_stream = make_batches(_token_stream_from_bin(val_bin), cfg)
     if max_batches is not None:
         import itertools
+
         _batch_stream = itertools.islice(_batch_stream, max_batches)
     val_batches = list(_batch_stream)
 
@@ -375,7 +379,10 @@ def main() -> None:
         seed_tokens = seed_inputs[0, :5].tolist()
 
         generated = sample_text(
-            model, cfg, device, seed_tokens,
+            model,
+            cfg,
+            device,
+            seed_tokens,
             max_new_tokens=args.max_new_tokens,
             top_k=args.top_k,
         )
@@ -384,6 +391,7 @@ def main() -> None:
         if tokenizer_path:
             try:
                 from src.tokenizer import BPETokenizer
+
                 tok = BPETokenizer.load(str(tokenizer_path))
                 decoded = tok.decode(generated)
                 print("── sample (decoded) ──────────────────────────────────")

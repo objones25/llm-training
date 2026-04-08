@@ -24,6 +24,7 @@ Internal classes (not exported):
     FeedForward
     TransformerBlock
 """
+
 from __future__ import annotations
 
 import torch
@@ -32,7 +33,6 @@ import torch.nn.functional as F
 
 from src.config import TrainConfig
 from src.kv_cache import KVCache, LayerKVCache
-
 
 # ── RoPE helpers ──────────────────────────────────────────────────────────────
 
@@ -73,9 +73,7 @@ def _rotate_half(x: torch.Tensor) -> torch.Tensor:
     return torch.cat([-x2, x1], dim=-1)
 
 
-def _apply_rope(
-    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
-) -> torch.Tensor:
+def _apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
     """Apply rotary embeddings to query or key tensors.
 
     Parameters
@@ -136,9 +134,9 @@ class CausalSelfAttention(nn.Module):
 
     def __init__(self, cfg: TrainConfig) -> None:
         super().__init__()
-        assert cfg.d_model % cfg.n_heads == 0, (
-            f"d_model ({cfg.d_model}) must be divisible by n_heads ({cfg.n_heads})"
-        )
+        assert (
+            cfg.d_model % cfg.n_heads == 0
+        ), f"d_model ({cfg.d_model}) must be divisible by n_heads ({cfg.n_heads})"
         self.n_heads = cfg.n_heads
         self.head_dim = cfg.d_model // cfg.n_heads
 
@@ -197,7 +195,9 @@ class CausalSelfAttention(nn.Module):
 
         if layer_cache is not None:
             # Extend the cache with the RoPE-encoded new K/V tensors.
-            k = torch.cat([layer_cache.k, k], dim=2)  # (B, n_heads, T_cached+T, head_dim)
+            k = torch.cat(
+                [layer_cache.k, k], dim=2
+            )  # (B, n_heads, T_cached+T, head_dim)
             v = torch.cat([layer_cache.v, v], dim=2)
             layer_cache.k = k
             layer_cache.v = v
@@ -342,9 +342,7 @@ class GPT(nn.Module):
         # (yielded under that name); lm_head.weight is tied — not double-counted.
         # Surfaced by train.py so the model itself does not print.
         self.n_params: int = sum(
-            p.numel()
-            for name, p in self.named_parameters()
-            if "embedding" not in name
+            p.numel() for name, p in self.named_parameters() if "embedding" not in name
         )
 
     def _init_weights(self, module: nn.Module) -> None:

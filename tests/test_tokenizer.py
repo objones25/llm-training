@@ -4,6 +4,7 @@ All tests are hermetic: no network, no GPU, no shared mutable state.
 The module-scoped ``tokenizer`` fixture is read-only in every test.
 Tests that write to disk use ``tmp_path`` exclusively.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -118,7 +119,9 @@ def test_ids_within_vocab_bounds(tokenizer: BPETokenizer) -> None:
 def test_no_padding_only_sequence(tokenizer: BPETokenizer) -> None:
     ids = tokenizer.encode("hello world")
     pad_id = tokenizer.token_to_id("[PAD]")
-    assert any(i != pad_id for i in ids), "non-empty text must not encode to all-padding"
+    assert any(
+        i != pad_id for i in ids
+    ), "non-empty text must not encode to all-padding"
 
 
 # ── Save / load (Rule 11, Rule 12) ────────────────────────────────────────────
@@ -137,7 +140,9 @@ def test_save_load_produces_identical_encodings(
     assert loaded.vocab_size == tokenizer.vocab_size
 
 
-def test_load_writes_only_to_tmp_path(tmp_path: pytest.TempPathFactory, tokenizer: BPETokenizer) -> None:
+def test_load_writes_only_to_tmp_path(
+    tmp_path: pytest.TempPathFactory, tokenizer: BPETokenizer
+) -> None:
     """Disk write goes through tmp_path — no stray files elsewhere."""
     path = str(tmp_path / "check.json")
     tokenizer.save(path)
@@ -177,9 +182,7 @@ def test_encode_is_deterministic(tokenizer: BPETokenizer) -> None:
 
 def test_train_is_deterministic_across_instances() -> None:
     """Two tokenizers trained on the same iterator produce identical encodings."""
-    corpus = (
-        ["hello world " * 5, "foo bar baz " * 5, "transformer attention " * 5] * 20
-    )
+    corpus = ["hello world " * 5, "foo bar baz " * 5, "transformer attention " * 5] * 20
 
     tok1 = BPETokenizer()
     tok1.train(iter(corpus), vocab_size=200)

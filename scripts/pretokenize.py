@@ -21,6 +21,7 @@ Usage::
     uv run python scripts/pretokenize.py --tokenizer tokenizer.json \\
         --seq-len 512 --val-every 100 --num-proc 8 --output-dir data
 """
+
 from __future__ import annotations
 
 import argparse

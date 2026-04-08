@@ -1,4 +1,5 @@
 """Shared pytest fixtures for the llm-training test suite."""
+
 from __future__ import annotations
 
 import logging

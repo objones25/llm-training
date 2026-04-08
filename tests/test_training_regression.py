@@ -5,6 +5,7 @@ Validates that the training loop produces a measurable loss decrease after
 computation. Marked as 'slow' so it runs only in the dedicated CI workflow
 (training-check.yml) and not in the default test suite.
 """
+
 from __future__ import annotations
 
 import math
@@ -66,9 +67,9 @@ def test_training_regression_loss_decreases(
         losses.append(float(kv["loss"]))
 
     assert len(losses) == 100, f"Expected 100 logged steps, got {len(losses)}"
-    assert losses[-1] < losses[0], (
-        f"Regression: final loss {losses[-1]:.4f} not less than initial {losses[0]:.4f}"
-    )
+    assert (
+        losses[-1] < losses[0]
+    ), f"Regression: final loss {losses[-1]:.4f} not less than initial {losses[0]:.4f}"
     # Sanity bound: after 100 steps loss should be below random-guessing ceiling
     random_loss = math.log(cfg.vocab_size)  # ln(256) ≈ 5.55
     assert losses[-1] < random_loss + 0.5, (

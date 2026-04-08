@@ -7,6 +7,7 @@ Usage::
     uv run python scripts/train_tokenizer.py
     uv run python scripts/train_tokenizer.py --max-docs 500000 --vocab-size 8192
 """
+
 from __future__ import annotations
 
 import argparse
@@ -68,12 +69,20 @@ def main() -> None:
 
     token = load_hf_token()
     print(f"HF_TOKEN: {'set' if token else 'not set (unauthenticated)'}")
-    print(f"Training BPE tokenizer (vocab_size={args.vocab_size}) "
-          f"on up to {args.max_docs:,} documents from {args.dataset_name}...")
+    print(
+        f"Training BPE tokenizer (vocab_size={args.vocab_size}) "
+        f"on up to {args.max_docs:,} documents from {args.dataset_name}..."
+    )
 
     tok = BPETokenizer()
     tok.train(
-        _text_stream(args.dataset_name, args.dataset_config, args.dataset_split, args.max_docs, token=token),
+        _text_stream(
+            args.dataset_name,
+            args.dataset_config,
+            args.dataset_split,
+            args.max_docs,
+            token=token,
+        ),
         vocab_size=args.vocab_size,
     )
 

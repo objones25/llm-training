@@ -4,6 +4,7 @@ All tests run on CPU with synthetic data. No network access.
 Minimum viable shape: batch=2, seq_len=16, vocab=256 (rules 5, 13).
 Every test that touches randomness sets its own seed (rule 15).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -12,7 +13,6 @@ import torch.nn.functional as F
 
 from src.config import TrainConfig
 from src.model import GPT
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -79,9 +79,9 @@ def test_loss_monotonically_decreasing(cfg: TrainConfig) -> None:
         optimizer.step()
         losses.append(loss.item())
 
-    assert losses[0] > losses[1] > losses[2], (
-        f"Loss not monotonically decreasing: {losses}"
-    )
+    assert (
+        losses[0] > losses[1] > losses[2]
+    ), f"Loss not monotonically decreasing: {losses}"
 
 
 def test_gradients_no_nan(model: GPT, cfg: TrainConfig) -> None:
@@ -134,16 +134,20 @@ def test_non_embedding_param_count_value(cfg: TrainConfig) -> None:
     torch.manual_seed(4)
     model = GPT(cfg)
 
-    expected = cfg.n_layers * (
-        3 * cfg.d_model ** 2          # qkv
-        + cfg.d_model ** 2            # out_proj
-        + 2 * cfg.d_model * cfg.d_ff  # fc1 + fc2
-        + 2 * cfg.d_model             # ln_1 weight, ln_2 weight (no bias)
-    ) + cfg.d_model                   # ln_f weight (no bias)
+    expected = (
+        cfg.n_layers
+        * (
+            3 * cfg.d_model**2  # qkv
+            + cfg.d_model**2  # out_proj
+            + 2 * cfg.d_model * cfg.d_ff  # fc1 + fc2
+            + 2 * cfg.d_model  # ln_1 weight, ln_2 weight (no bias)
+        )
+        + cfg.d_model
+    )  # ln_f weight (no bias)
 
-    assert model.n_params == expected, (
-        f"Expected {expected:,} non-embedding params, got {model.n_params:,}"
-    )
+    assert (
+        model.n_params == expected
+    ), f"Expected {expected:,} non-embedding params, got {model.n_params:,}"
 
 
 # ── Inference correctness ─────────────────────────────────────────────────────
@@ -172,7 +176,9 @@ def test_causal_mask(model: GPT, cfg: TrainConfig) -> None:
     # Corrupt the second half of the sequence
     split = cfg.seq_len // 2
     idx_corrupted = idx.clone()
-    idx_corrupted[:, split:] = torch.randint(0, cfg.vocab_size, (1, cfg.seq_len - split))
+    idx_corrupted[:, split:] = torch.randint(
+        0, cfg.vocab_size, (1, cfg.seq_len - split)
+    )
 
     with torch.no_grad():
         logits_corrupted = model(idx_corrupted)

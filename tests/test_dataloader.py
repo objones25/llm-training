@@ -2,6 +2,7 @@
 
 All tests use synthetic token streams — no network, no tokenizer, no GPU.
 """
+
 from __future__ import annotations
 
 import types
@@ -11,7 +12,6 @@ import torch
 
 from src.config import TrainConfig
 from src.dataloader import make_batches
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -81,9 +81,9 @@ def test_targets_are_inputs_shifted(cfg: TrainConfig) -> None:
 
     for b in range(cfg.batch_size):
         # All interior positions: target[t] == input[t+1]
-        assert torch.equal(targets[b, :-1], inputs[b, 1:]), (
-            "targets[b, t] must equal inputs[b, t+1] for t < seq_len-1"
-        )
+        assert torch.equal(
+            targets[b, :-1], inputs[b, 1:]
+        ), "targets[b, t] must equal inputs[b, t+1] for t < seq_len-1"
 
 
 def test_targets_match_next_token_across_rows(cfg: TrainConfig) -> None:
@@ -102,7 +102,9 @@ def test_targets_match_next_token_across_rows(cfg: TrainConfig) -> None:
         # targets[b, -1] and inputs[b+1, 0] are adjacent in the flat stream.
         last_target = targets[b, -1].item()
         next_row_first = inputs[b + 1, 0].item()
-        assert (last_target + 1) % cfg.vocab_size == next_row_first % cfg.vocab_size, (
+        assert (
+            last_target + 1
+        ) % cfg.vocab_size == next_row_first % cfg.vocab_size, (
             "last target in row b must be immediately before first input of row b+1"
         )
 
