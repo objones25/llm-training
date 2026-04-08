@@ -19,7 +19,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import math
 from collections.abc import Generator
 from pathlib import Path
 

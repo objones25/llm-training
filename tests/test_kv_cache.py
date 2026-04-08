@@ -11,7 +11,6 @@ test: if the cached and uncached paths disagree, the cache is broken.
 from __future__ import annotations
 
 import torch
-import pytest
 
 from src.config import TrainConfig
 from src.kv_cache import KVCache, LayerKVCache

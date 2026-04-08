@@ -6,10 +6,7 @@ No training loop is run. All disk writes use tmp_path.
 """
 from __future__ import annotations
 
-import time
 from pathlib import Path
-
-import pytest
 
 from src.plots import (
     plot_grad_heatmap,
@@ -62,10 +59,9 @@ def test_plot_loss_overwrites_existing(tmp_path: Path) -> None:
     """Calling plot_loss twice must overwrite, not append to, the existing file."""
     out = tmp_path / "loss.png"
     plot_loss(STEPS, LOSSES, out)
-    size_first = out.stat().st_size
 
     # Slightly different data to ensure the file actually changes.
-    plot_loss(STEPS, [l + 0.1 for l in LOSSES], out)
+    plot_loss(STEPS, [v + 0.1 for v in LOSSES], out)
     assert out.exists()
     # File must not be empty after overwrite.
     assert out.stat().st_size > 0

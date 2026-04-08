@@ -60,7 +60,7 @@ class TrainConfig:
     # Training
     max_steps: int = 700_000
     batch_size: int = 32
-    seq_len: int = 512
+    seq_len: int = 1024
     learning_rate: float = 2e-4
     warmup_steps: int = 7_000
     weight_decay: float = 0.1
@@ -343,13 +343,12 @@ each test gets written.
 
 ### Architectural philosophy
 
-**Prefer standard defaults over novelty.** This project uses GPT-2 style conventions — learned absolute positional embeddings, RMSNorm, standard GELU FF blocks — because they are well-understood, well-tested, and sufficient at the current scale (`seq_len=512`, ~600M parameters). The added complexity of RoPE, SwiGLU, or DDP is not justified until the model is scaled up.
+**Prefer standard defaults over novelty.** This project uses RoPE positional encoding, RMSNorm, and standard GELU FF blocks — well-understood components that are sufficient at the current scale (`seq_len=1024`, ~600M parameters). The added complexity of SwiGLU or DDP is not justified until the model is scaled up further.
 
 Before adopting any architectural change, ask: does this provide a measurable benefit at the target `N` and `D`? If the answer is "only at larger scale", defer it. Keep the implementation surface small and the diagnostics interpretable.
 
 Changes that become worthwhile at larger scale:
 
-- **RoPE** — when `seq_len > 512` or generalization beyond trained length is needed
 - **SwiGLU** — outperforms GELU at the same parameter count; worthwhile for any serious scaled run
 - **DDP** — required to use more than one GPU; adds significant implementation surface
 

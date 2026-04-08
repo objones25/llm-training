@@ -8,7 +8,6 @@ import io
 
 import pytest
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from src.config import TrainConfig
@@ -317,8 +316,6 @@ def test_muon_group_contains_only_matrix_params(
     model: GPT, cfg: TrainConfig
 ) -> None:
     """Muon optimizer must contain only matrix params (no ln, no embed)."""
-    from src.muon import Muon as MuonCls
-
     muon_cfg = TrainConfig(
         vocab_size=cfg.vocab_size,
         n_layers=cfg.n_layers,

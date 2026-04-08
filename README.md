@@ -59,7 +59,7 @@ uv run python scripts/pretokenize.py --tokenizer tokenizer.json
 | Flag              | Default                     | Description                                         |
 | ----------------- | --------------------------- | --------------------------------------------------- |
 | `--tokenizer`     | _(required)_                | Path to a tokenizer JSON from step 1                |
-| `--seq-len`       | `512`                       | Fixed sequence length for each chunk                |
+| `--seq-len`       | `1024`                      | Fixed sequence length for each chunk                |
 | `--val-every`     | `100`                       | Route every Nth document to the val split (~1% val) |
 | `--output-dir`    | `data`                      | Directory for `train.bin` and `val.bin`             |
 | `--dataset-name`  | `HuggingFaceFW/fineweb-edu` | HuggingFace dataset name                            |
@@ -245,21 +245,7 @@ If no tokenizer is found, the sample is printed as raw token IDs instead.
 
 ## Future Enhancements
 
-The current architecture uses standard GPT-2 defaults, chosen deliberately — the added complexity of newer techniques isn't justified at `seq_len=512` and ~600M parameters. If the model is scaled up (larger corpus, longer context, more parameters), the following changes become worthwhile:
-
-### Positional embeddings — RoPE
-
-The current learned absolute embedding table (`nn.Embedding(seq_len, d_model)`) cannot generalize beyond the trained sequence length. **Rotary Position Embeddings (RoPE)** encode relative position directly into the Q and K projections inside each attention head, which:
-
-- Generalizes to sequences longer than `seq_len` at inference time
-- Provides a relative-distance inductive bias (adjacent tokens are naturally closer)
-- Is the standard in LLaMA, Mistral, and most post-2022 open models
-
-Implementation change: remove `self.position_embedding`, apply per-head rotation to Q and K inside `CausalSelfAttention.forward()` before the attention dot product.
-
-### Normalization — RMSNorm
-
-Replace `nn.LayerNorm` with **RMSNorm** (no mean-centering, only RMS scaling). Slightly faster, equally stable, and used in LLaMA/Mistral. A one-line swap in the model.
+The current architecture uses RoPE positional encoding, RMSNorm, and GELU feed-forward blocks — well-understood components at `seq_len=1024` and ~600M parameters. If the model is scaled up (larger corpus, longer context, more parameters), the following changes become worthwhile:
 
 ### Feed-forward activation — SwiGLU
 
@@ -271,7 +257,7 @@ The current training loop uses a single `cfg.device`. Adding `torch.nn.parallel.
 
 ### Longer context
 
-All three changes above (RoPE + RMSNorm + SwiGLU) are prerequisites for a longer-context run. At `seq_len=512` the quadratic attention cost is negligible; at `seq_len=4096` it becomes the bottleneck and FlashAttention (already enabled via `scaled_dot_product_attention`) becomes essential.
+At `seq_len=1024` the quadratic attention cost is manageable; at `seq_len=4096` it becomes the bottleneck and FlashAttention (already enabled via `scaled_dot_product_attention`) becomes essential. RoPE (already implemented) means the model can generalize to longer sequences at inference time without architectural changes.
 
 ---
 

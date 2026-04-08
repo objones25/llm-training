@@ -1,3 +1,11 @@
+"""Training configuration for the LLM.
+
+Single source of truth for all hyperparameters.  Construct a ``TrainConfig``
+at startup and pass it through to every module — nothing is hardcoded elsewhere.
+
+All parameters are validated eagerly in ``__post_init__``; invalid configs
+raise ``ValueError`` immediately rather than failing silently downstream.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
