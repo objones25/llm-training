@@ -11,25 +11,33 @@ A small GPT-style language model trained on [fineweb-edu](https://huggingface.co
 A decoder-only GPT transformer with **12 layers**, **2 048-dimensional** residual stream, and **32 768-token** vocabulary — approximately 604 M non-embedding parameters at full scale.
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'lineColor': '#6366f1', 'edgeLabelBackground': '#ffffff'}}}%%
 flowchart TB
-    IN["Input Token IDs<br/>[B, T]"]
-    EMBED["Token Embedding<br/>vocab_size=32768 → d_model=2048"]
+    classDef io    fill:#f1f5f9,stroke:#64748b,color:#1e293b,font-weight:bold
+    classDef embed fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a,font-weight:bold
+    classDef norm  fill:#fef3c7,stroke:#f59e0b,color:#78350f
+    classDef attn  fill:#ede9fe,stroke:#7c3aed,color:#2e1065
+    classDef ff    fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef head  fill:#fce7f3,stroke:#db2777,color:#831843,font-weight:bold
+
+    IN["Input Token IDs<br/>[B, T]"]:::io
+    EMBED["Token Embedding<br/>vocab_size=32768 → d_model=2048"]:::embed
 
     IN --> EMBED
 
     subgraph BLOCK["TransformerBlock x12 — pre-norm, residual at each sub-layer"]
         direction TB
-        LN1["RMSNorm  ln_1"]
-        ATTN["CausalSelfAttention<br/>32 heads · head_dim=64<br/>QKV: 2048 → 6144 · out_proj: 2048 → 2048<br/>RoPE on Q and K · FlashAttention-2"]
-        LN2["RMSNorm  ln_2"]
-        FF["FeedForward<br/>2048 → 8192 → 2048 · GELU"]
+        LN1["RMSNorm  ln_1"]:::norm
+        ATTN["CausalSelfAttention<br/>32 heads · head_dim=64<br/>QKV: 2048 → 6144 · out_proj: 2048 → 2048<br/>RoPE on Q and K · FlashAttention-2"]:::attn
+        LN2["RMSNorm  ln_2"]:::norm
+        FF["FeedForward<br/>2048 → 8192 → 2048 · GELU"]:::ff
         LN1 --> ATTN --> LN2 --> FF
     end
 
     EMBED --> BLOCK
-    BLOCK --> LNF["RMSNorm  ln_f"]
-    LNF --> LMH["LM Head<br/>2048 → 32768<br/>weight-tied to token embedding"]
-    LMH --> OUT["Output Logits<br/>[B, T, 32768]"]
+    BLOCK --> LNF["RMSNorm  ln_f"]:::norm
+    LNF --> LMH["LM Head<br/>2048 → 32768<br/>weight-tied to token embedding"]:::head
+    LMH --> OUT["Output Logits<br/>[B, T, 32768]"]:::io
 ```
 
 | Parameter            | Value  |
