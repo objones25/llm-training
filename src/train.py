@@ -44,7 +44,7 @@ from typing import cast
 import torch
 import torch.nn.functional as F
 
-from src.checkpoint import save_checkpoint
+from src.checkpoint import load_checkpoint, save_checkpoint
 from src.config import TrainConfig
 from src.dataloader import make_batches
 from src.logger import GradientLogger, _log, configure_logging
@@ -66,6 +66,7 @@ def train(
     model: GPT | None = None,
     token_stream: Iterable[int] | None = None,
     val_token_stream: Iterable[int] | None = None,
+    resume_from: Path | str | None = None,
 ) -> GPT:
     """Run the pretraining loop for up to ``cfg.max_steps`` steps.
 
@@ -83,6 +84,13 @@ def train(
         Pre-tokenized validation token IDs.  Consumed eagerly at startup into
         fixed batches; evaluated every ``cfg.val_every`` steps when provided.
         When ``None`` or ``cfg.val_every == 0``, validation is skipped.
+    resume_from : Path | str | None
+        Path to a checkpoint file produced by :func:`save_checkpoint`.  When
+        provided, model/optimizer/scheduler states are restored and the step
+        counter is offset so logging and ``max_steps`` accounting continue
+        from the saved step.  The token stream restarts from the beginning
+        (acceptable because the dataset is large relative to steps already
+        taken).
 
     Returns
     -------
@@ -123,6 +131,17 @@ def train(
         scheduler = make_scheduler(optimizer, cfg)
         _primary_opt = optimizer
         _schedulers = None
+
+    # ── Resume from checkpoint ────────────────────────────────────────────────
+    start_step: int = 0
+    if resume_from is not None:
+        _opt_for_load = optimizer_result if _use_muon else optimizer_result
+        _sched_for_load = _schedulers if _use_muon else scheduler
+        start_step = load_checkpoint(
+            resume_from, model, _opt_for_load, scheduler=_sched_for_load
+        )
+        _log.info(f"resumed from {resume_from} at step={start_step}")
+        start_step += 1  # next step to run is start_step + 1
 
     logger = GradientLogger(cfg)
 
@@ -177,7 +196,8 @@ def train(
 
     step = -1
     for step, (inputs, targets) in enumerate(batches):
-        if step >= cfg.max_steps:
+        actual_step = step + start_step
+        if actual_step >= cfg.max_steps:
             break
 
         inputs = inputs.to(device)
@@ -197,7 +217,9 @@ def train(
                 )
 
             if not torch.isfinite(loss):
-                raise RuntimeError(f"Loss is {loss.item()} at step {step}. Aborting.")
+                raise RuntimeError(
+                    f"Loss is {loss.item()} at step {actual_step}. Aborting."
+                )
 
             scaler.scale(loss).backward()
 
@@ -238,7 +260,9 @@ def train(
             )
 
             if not torch.isfinite(loss):
-                raise RuntimeError(f"Loss is {loss.item()} at step {step}. Aborting.")
+                raise RuntimeError(
+                    f"Loss is {loss.item()} at step {actual_step}. Aborting."
+                )
 
             loss.backward()
 
@@ -275,11 +299,11 @@ def train(
 
         # Gradients are still populated here (zero_grad not called until
         # the next iteration).
-        logger.log_step(step, loss_val, current_lr, layer_norms_dict)
-        logger.log_layers(step, layer_norms_dict, model)
+        logger.log_step(actual_step, loss_val, current_lr, layer_norms_dict)
+        logger.log_layers(actual_step, layer_norms_dict, model)
 
         # ── Per-step scalar tracking ──────────────────────────────────────────
-        steps_list.append(step)
+        steps_list.append(actual_step)
         losses_list.append(loss_val)
         lrs_list.append(current_lr)
 
@@ -297,27 +321,27 @@ def train(
         grad_norm_maxs_list.append(grad_norm_max)
 
         # ── Heatmap data at configured cadences ───────────────────────────────
-        if step % cfg.grad_log_every == 0 and layer_norms_dict:
+        if actual_step % cfg.grad_log_every == 0 and layer_norms_dict:
             if layer_names is None:
                 layer_names = list(layer_norms_dict.keys())
-            grad_heatmap_steps.append(step)
+            grad_heatmap_steps.append(actual_step)
             grad_heatmap_rows.append(
                 [layer_norms_dict.get(n, 0.0) for n in layer_names]
             )
 
-        if step % cfg.weight_log_every == 0:
+        if actual_step % cfg.weight_log_every == 0:
             weight_norms_dict: dict[str, float] = {
                 name: p.norm().item() for name, p in model.named_parameters()
             }
             if layer_names is None:
                 layer_names = list(weight_norms_dict.keys())
-            weight_heatmap_steps.append(step)
+            weight_heatmap_steps.append(actual_step)
             weight_heatmap_rows.append(
                 [weight_norms_dict.get(n, 0.0) for n in layer_names]
             )
 
         # ── Validation loss ───────────────────────────────────────────────────
-        if _val_batches and cfg.val_every > 0 and step % cfg.val_every == 0:
+        if _val_batches and cfg.val_every > 0 and actual_step % cfg.val_every == 0:
             with torch.no_grad():
                 model.eval()
                 val_loss_total = 0.0
@@ -331,7 +355,7 @@ def train(
                 model.train()
             val_loss_avg = val_loss_total / n_val
             logger.log_val(step, val_loss_avg)
-            val_steps_list.append(step)
+            val_steps_list.append(actual_step)
             val_losses_list.append(val_loss_avg)
 
             # ── Best checkpoint + early stopping ──────────────────────────────
@@ -343,7 +367,7 @@ def train(
                 save_checkpoint(
                     model,
                     optimizer_result,
-                    step,
+                    actual_step,
                     cfg,
                     scheduler=_sched_to_save,
                     save_as_best=True,
@@ -353,7 +377,7 @@ def train(
                     _patience_counter += 1
                     if _patience_counter >= cfg.early_stopping_patience:
                         _log.info(
-                            f"early_stopping triggered at step={step} "
+                            f"early_stopping triggered at step={actual_step} "
                             f"best_val_loss={_best_val_loss:.4f} "
                             f"patience={cfg.early_stopping_patience}"
                         )
@@ -361,7 +385,7 @@ def train(
                         break
 
         # ── Save / overwrite plots ─────────────────────────────────────────────
-        if step % cfg.plot_every == 0:
+        if actual_step % cfg.plot_every == 0:
             plot_loss(
                 steps_list,
                 losses_list,
@@ -395,7 +419,7 @@ def train(
                 plot_grad_hist(latest_grad_norms, plot_dir / "grad_hist.png")
 
     # ── Token stream exhaustion guard ──────────────────────────────────────────
-    steps_completed = step + 1 if step >= 0 else 0
+    steps_completed = (step + start_step + 1) if step >= 0 else start_step
     if not _early_stopped and steps_completed < cfg.max_steps:
         warnings.warn(
             f"Token stream exhausted after {steps_completed} steps; "

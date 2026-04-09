@@ -110,6 +110,11 @@ def main() -> None:
         default=False,
         help="Enable torch.compile with reduce-overhead mode (adds 30-60s cold start)",
     )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="Path to a best.pt checkpoint to resume training from",
+    )
     args = parser.parse_args()
 
     import numpy as np
@@ -185,7 +190,12 @@ def main() -> None:
 
     from src.train import train
 
-    train(cfg, token_stream=_token_stream(train_bin), val_token_stream=val_stream)
+    train(
+        cfg,
+        token_stream=_token_stream(train_bin),
+        val_token_stream=val_stream,
+        resume_from=args.resume,
+    )
 
     print()
     print("Training complete.")
