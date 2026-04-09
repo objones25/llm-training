@@ -68,7 +68,7 @@ class TrainConfig:
     plot_every: int = 500
     grad_norm_warn_threshold: float = 10.0  # per-layer threshold; emits WARNING line
     grad_norm_spike_threshold: float = (
-        2.5  # total-norm threshold; dumps all layers immediately
+        20.0  # total-norm threshold; dumps all layers immediately
     )
     plot_dir: str = "plots"
     log_file: str = "train.log"
