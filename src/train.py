@@ -354,7 +354,7 @@ def train(
                     ).item()
                 model.train()
             val_loss_avg = val_loss_total / n_val
-            logger.log_val(step, val_loss_avg)
+            logger.log_val(actual_step, val_loss_avg)
             val_steps_list.append(actual_step)
             val_losses_list.append(val_loss_avg)
 
